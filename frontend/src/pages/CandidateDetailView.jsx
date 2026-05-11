@@ -70,6 +70,13 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
         return 'text-red-600';
     };
 
+    const getTaskMatchLabel = (score, isWinner) => {
+        if (score >= 0.7) return isWinner ? 'Strongest Match' : 'Strong Match';
+        if (score >= 0.45) return isWinner ? 'Top Partial Match' : 'Partial Match';
+        if (score >= 0.2) return isWinner ? 'Top Weak Evidence' : 'Weak Evidence';
+        return 'Insufficient Evidence';
+    };
+
     const getConfidenceBadge = (rating) => {
         const styles = {
             'High': 'bg-green-100 text-green-800 border-green-200',
@@ -127,7 +134,7 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
                                     </span>
                                 </div>
                                 <p className="text-gray-500 mt-1">
-                                    Passed <strong>{candidate.tasks_won}</strong> of {relevantAllocations.length || 'N/A'} tasks
+                                    Top candidate on <strong>{candidate.tasks_won}</strong> of {relevantAllocations.length || 'N/A'} signals
                                 </p>
                                 <div className="mt-4 grid grid-cols-3 gap-2 text-xs max-w-md">
                                     <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
@@ -230,9 +237,9 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
                                             )}
                                             <div className="text-left">
                                                 <h4 className="font-semibold text-gray-900">{alloc.task_title}</h4>
-                                                {isWinner && (
-                                                    <span className="text-xs text-green-600 font-medium">Best Match</span>
-                                                )}
+                                                <span className={`text-xs font-medium ${getScoreColor(score)}`}>
+                                                    {getTaskMatchLabel(score, isWinner)}
+                                                </span>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-4">

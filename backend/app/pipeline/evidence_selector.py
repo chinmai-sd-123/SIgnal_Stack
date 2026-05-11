@@ -119,6 +119,9 @@ def get_file_priority(file_path: str, keywords: Optional[List[str]] = None) -> T
     file_lower = file_path.lower()
     filename_lower = filename.lower()
 
+    if filename_lower == "__init__.py":
+        return (0, "other")
+
     # Task-specific implementation files should outrank generic manifests,
     # README, Docker, and CI files. Otherwise the LLM sees infrastructure before
     # the actual code that proves capability.
@@ -165,6 +168,12 @@ def get_file_priority(file_path: str, keywords: Optional[List[str]] = None) -> T
             
             return (weight, category)
     
+    # Default priority for source files. Small projects often put the real
+    # implementation in modules such as app/github.py or app/gemini.py rather
+    # than routes/controllers folders, so do not drop these files entirely.
+    if filename_lower.endswith(CODE_EXTENSIONS):
+        return (45, "code")
+
     # Default low priority for other files
     return (0, "other")
 
@@ -242,9 +251,18 @@ def extract_snippets(
     
     lines = content.split('\n')
     total_lines = len(lines)
+
+    # Small implementation files are best shown whole. A clipped import-only
+    # preview makes weak projects look less auditable than they really are.
+    filename = file_path.split('/')[-1].lower()
+    if filename.endswith(CODE_EXTENSIONS) and len(content) <= max_length:
+        return {
+            "file": file_path,
+            "lines": f"1-{total_lines}",
+            "snippet": content
+        }
     
     # For README, get intro section
-    filename = file_path.split('/')[-1].lower()
     if 'readme' in filename:
         snippet = content[:2048]  # First 2KB for README
         return {
@@ -259,8 +277,8 @@ def extract_snippets(
         for i, line in enumerate(lines, 1):
             line_lower = line.lower()
             if any(kw in line_lower for kw in lowered):
-                start_idx = max(0, i - 2)
-                end_idx = min(total_lines, i + 4)
+                start_idx = max(0, i - 8)
+                end_idx = min(total_lines, i + 30)
                 snippet_lines = lines[start_idx:end_idx]
                 snippet = "\n".join(snippet_lines)
                 return {

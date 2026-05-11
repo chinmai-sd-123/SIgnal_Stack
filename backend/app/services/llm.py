@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 from typing import Any, Dict, List
 
@@ -192,6 +193,57 @@ class OpenAILLMService:
 
         return "\n\n".join(parts)
 
+    def _source_code_evidence(self, evidence: List[Dict]) -> List[Dict]:
+        """Return source code evidence only, excluding model-generated findings."""
+        return [
+            item for item in evidence
+            if item.get("type") == "code_snippet"
+            and not str(item.get("ref", "")).startswith("AI_FINDING:")
+        ]
+
+    def _fallback_relevant_evidence(self, evidence: List[Dict]) -> str:
+        """Build grounded key evidence from the first source snippet."""
+        source_items = self._source_code_evidence(evidence)
+        if not source_items:
+            return "No code evidence found."
+
+        item = source_items[0]
+        ref = item.get("ref", "CODE")
+        snippet = item.get("snippet", "")
+        lines = snippet.splitlines()
+        preview = "\n".join(lines[:24]).strip()
+        if len(preview) > 1600:
+            preview = preview[:1600].rstrip() + "\n[... truncated ...]"
+        return f"{ref}\n{preview}"
+
+    def _is_grounded_relevant_evidence(self, relevant_evidence: str, evidence: List[Dict]) -> bool:
+        """
+        Check that model-selected key evidence is actually traceable to supplied
+        evidence. This prevents invented file/function claims from becoming the
+        trusted "Key Evidence" card.
+        """
+        text = (relevant_evidence or "").strip()
+        if not text or text.lower() in {"none", "error", "no code evidence found."}:
+            return True
+
+        normalized_text = re.sub(r"\s+", " ", text).lower()
+        for item in evidence:
+            if str(item.get("ref", "")).startswith("AI_FINDING:"):
+                continue
+            snippet = str(item.get("snippet", ""))
+            normalized_snippet = re.sub(r"\s+", " ", snippet).lower()
+            if len(normalized_text) >= 40 and normalized_text in normalized_snippet:
+                return True
+
+            # Allow shorter direct line quotes when at least one meaningful
+            # non-comment line is copied exactly.
+            for line in snippet.splitlines():
+                line = line.strip()
+                if len(line) >= 24 and line.lower() in normalized_text:
+                    return True
+
+        return False
+
     # ── FIXED: interpret_signals ────────────────────────────────────────────
     def interpret_signals(
         self,
@@ -231,7 +283,7 @@ class OpenAILLMService:
                         )
                     }]
 
-            has_code = any(e.get("type") in ("code_snippet", "repo_context") for e in evidence)
+            has_code = bool(self._source_code_evidence(evidence))
             has_artifact = any(e.get("type") == "work_artifact" for e in evidence)
 
             evidence_text = self._build_evidence_sections(evidence)
@@ -299,6 +351,7 @@ EVIDENCE (read all sections before scoring):
 YOUR RESPONSE MUST:
 1. Score based on what the code ACTUALLY DOES, not what the README claims.
 2. Set relevant_evidence to a direct quote or file reference from the CODE EVIDENCE section above.
+   It must include the source ref, for example "FILE:app/main.py".
    If no code evidence exists, write "No code evidence found."
 3. Not give scores above 0.6 unless working implementation code is present in CODE EVIDENCE.
 4. Apply all applicable penalties before arriving at your final strength score.
@@ -340,6 +393,18 @@ Respond with JSON only. No explanation outside the JSON.
 
             # Clamp all values
             result["strength"] = max(0.0, min(1.0, float(result.get("strength", 0.0))))
+            if not has_code and not has_artifact:
+                result["strength"] = min(result["strength"], 0.2)
+            elif not has_code and has_artifact:
+                result["strength"] = min(result["strength"], 0.6)
+
+            relevant = str(result.get("relevant_evidence", "") or "").strip()
+            if not self._is_grounded_relevant_evidence(relevant, evidence):
+                relevant = self._fallback_relevant_evidence(evidence)
+            if relevant.lower() in {"", "none", "error"} and has_code:
+                relevant = self._fallback_relevant_evidence(evidence)
+            result["relevant_evidence"] = relevant
+
             for key in ["project_completion", "engineering_quality", "communication", "innovation", "depth_novelty"]:
                 dims = result.setdefault("dimensions", {})
                 dims[key] = max(0.0, min(10.0, float(dims.get(key, 0.0))))

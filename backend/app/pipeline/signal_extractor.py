@@ -306,7 +306,7 @@ class SignalExtractor:
                 # Pass merged_keywords so snippets anchor to task-relevant lines
                 snippet_data = extract_snippets(
                     pf.path, content,
-                    max_length=600,
+                    max_length=5000,
                     keywords=merged_keywords,
                 )
                 if not snippet_data["snippet"].strip():
@@ -356,7 +356,7 @@ class SignalExtractor:
                                 evidence.append(schemas.Evidence(
                                     type="code_snippet",
                                     ref=f"{f}#L{i + 1}",
-                                    snippet=snippet[:500],
+                                    snippet=snippet[:1200],
                                     source_url=f"{clean_repo_url}/blob/{default_branch}/{f}#L{start+1}-L{end}",
                                 ))
                                 break
@@ -375,7 +375,7 @@ class SignalExtractor:
                         evidence.append(schemas.Evidence(
                             type="code_snippet",
                             ref=f,
-                            snippet=f"File related to '{task_title}':\n\n" + "\n".join(lines)[:500],
+                            snippet=f"File related to '{task_title}':\n\n" + "\n".join(lines)[:1200],
                             source_url=f"{clean_repo_url}/blob/{default_branch}/{f}",
                         ))
 
@@ -402,7 +402,7 @@ class SignalExtractor:
                 evidence.append(schemas.Evidence(
                     type="code_snippet",
                     ref=main_file,
-                    snippet="\n".join(lines)[:500],
+                    snippet="\n".join(lines)[:1200],
                     source_url=f"{clean_repo_url}/blob/{default_branch}/{main_file}",
                 ))
             else:
@@ -416,6 +416,11 @@ class SignalExtractor:
         # ── Repo structure + README context (always appended, but kept lean) ──
         # Only include README if we have fewer than 3 code evidence items
         # (avoids crowding out code snippets with a 1500-char README dump)
+        # Present implementation code before manifests/README/config in the UI.
+        # The LLM already buckets evidence by type, but humans should see the
+        # proof-bearing files first when auditing a report.
+        evidence.sort(key=lambda item: 0 if item.type == "code_snippet" else 1)
+
         readme_file = next((f for f in files if f.lower().split("/")[-1].startswith("readme")), None)
         readme_content = ""
         if readme_file and len(evidence) < 3:
