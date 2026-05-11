@@ -1,0 +1,603 @@
+import React, { useEffect, useState, useMemo } from 'react';
+import { useParams, useLocation } from 'react-router-dom';
+import { CheckCircle, AlertTriangle, XCircle, Shield, RotateCcw, Users, TrendingUp, Eye, BarChart3, Loader2 } from 'lucide-react';
+import {
+    Bar,
+    BarChart,
+    CartesianGrid,
+    Legend,
+    PolarAngleAxis,
+    PolarGrid,
+    PolarRadiusAxis,
+    Radar,
+    RadarChart,
+    ResponsiveContainer,
+    Tooltip,
+    XAxis,
+    YAxis,
+} from 'recharts';
+import { submitFeedback, getEvaluation, resetDecision } from '../api';
+import CandidateDetailView from './CandidateDetailView';
+import FeedbackModal from '../components/FeedbackModal';
+
+const CANDIDATE_COLORS = ['#0b5f66', '#0f766e', '#2d8c8f', '#6aa9a6', '#c9a227', '#f2e4b5'];
+
+export default function EvaluationView() {
+    const { jobId } = useParams();
+    const location = useLocation();
+    const [evaluation, setEvaluation] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [processing, setProcessing] = useState(false); // Track action button state
+    const [feedbackGiven, setFeedbackGiven] = useState(false);
+
+    // NEW: Feedback Modal State
+    const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+    const [lastAction, setLastAction] = useState({ type: null, candidate: null });
+
+    // NEW: Track which candidate is being viewed in detail
+    const [selectedCandidate, setSelectedCandidate] = useState(null);
+
+    const anonymized = location.state?.anonymized || false;
+
+    useEffect(() => {
+        if (location.state?.result) {
+            setEvaluation(location.state.result.evaluation);
+            setLoading(false);
+        } else {
+            getEvaluation(jobId)
+                .then(data => {
+                    if (data.status === 'pending') {
+                        setLoading(true);
+                    } else if (data.evaluation) {
+                        setEvaluation(data.evaluation);
+                        if (data.evaluation.human_action_required === false) {
+                            setFeedbackGiven(true);
+                        }
+                        setLoading(false);
+                    } else {
+                        setLoading(false);
+                    }
+                })
+                .catch(err => {
+                    console.error("Failed to load evaluation", err);
+                    setLoading(false);
+                });
+        }
+    }, [location.state, jobId]);
+
+    const handleAction = async (action, candidateName = null) => {
+        if (!evaluation || processing) return;
+        setProcessing(true);
+        try {
+            let newCandidatesList = [];
+            let newRejectedList = evaluation.decision?.rejected_candidates || [];
+
+            // Get current list of hired candidates
+            if (evaluation.decision?.selected_candidates) {
+                newCandidatesList = [...evaluation.decision.selected_candidates];
+            } else if (evaluation.decision?.selected_candidate) {
+                newCandidatesList = [evaluation.decision.selected_candidate];
+            }
+
+            // Hiring Logic
+            if (action === 'hire' && candidateName) {
+                if (!newCandidatesList.includes(candidateName)) {
+                    newCandidatesList.push(candidateName);
+                    // Remove from rejected if present
+                    newRejectedList = newRejectedList.filter(c => c !== candidateName);
+                }
+            } else if (action === 'reject' && candidateName) {
+                if (!newRejectedList.includes(candidateName)) {
+                    newRejectedList.push(candidateName);
+                    // Remove from hired if present
+                    newCandidatesList = newCandidatesList.filter(c => c !== candidateName);
+                }
+            } else if (action === 'reject_all') {
+                newCandidatesList = []; // Clear list
+            }
+
+            await submitFeedback({
+                job_id: evaluation.job_id,
+                evaluation_id: "eval_123",
+                result: action.includes('hire') ? 'success' : 'failure',
+                metrics: {
+                    action_taken: action === 'reject_all' ? 'reject_all' : (action === 'reject' ? 'reject' : 'hire'),
+                    selected_candidates: newCandidatesList,
+                    rejected_candidates: newRejectedList,
+                    selected_candidate: newCandidatesList.length > 0 ? newCandidatesList[0] : null
+                }
+            });
+
+            // Update local state immediately
+            setFeedbackGiven(true);
+            setEvaluation(prev => ({
+                ...prev,
+                decision: {
+                    action_taken: action === 'reject_all' ? 'reject_all' : (action === 'reject' ? 'reject' : 'hire'),
+                    selected_candidates: newCandidatesList,
+                    rejected_candidates: newRejectedList,
+                    selected_candidate: newCandidatesList.length > 0 ? newCandidatesList[0] : null
+                }
+            }));
+
+            setSelectedCandidate(null); // Return to dashboard
+
+            // TRIGGER FEEDBACK MODAL
+            if (action === 'hire' || action === 'reject' || action === 'reject_all') {
+                setLastAction({ type: action, candidate: candidateName });
+                setFeedbackModalOpen(true);
+            }
+
+        } catch (error) {
+            console.error("Failed to submit feedback", error);
+            alert("Failed to submit decision: " + error.message);
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    // ... utility functions ...
+    const getScoreColor = (score) => {
+        if (score >= 0.7) return 'text-green-600';
+        if (score >= 0.4) return 'text-yellow-600';
+        return 'text-red-600';
+    };
+
+    const getConfidenceBadge = (rating) => {
+        const styles = {
+            'High': 'bg-green-100 text-green-800 border-green-200',
+            'Medium': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+            'Low': 'bg-red-100 text-red-800 border-red-200'
+        };
+        return styles[rating] || styles['Medium'];
+    };
+
+    // Memoize summaries to prevent recalculation on every render
+    const fallbackSummaries = useMemo(() => {
+        if (!evaluation) return [];
+
+        // Use backend summaries if available
+        if (evaluation.candidate_summaries?.length > 0) {
+            return evaluation.candidate_summaries;
+        }
+
+        // Robust fallback logic
+        const allocations = evaluation.work_allocation || [];
+        if (allocations.length === 0) return [];
+
+        const uniqueCandidates = [...new Set(allocations.map(a => a.recommended_candidate))]
+            .filter(name => name && name !== 'None' && name !== 'null');
+
+        return uniqueCandidates.map(candidateName => {
+            const wonTasks = allocations.filter(a => a.recommended_candidate === candidateName);
+            const avgConf = wonTasks.length > 0
+                ? wonTasks.reduce((acc, t) => acc + t.confidence, 0) / wonTasks.length
+                : 0;
+
+            return {
+                candidate_id: candidateName,
+                overall_score: avgConf,
+                tasks_won: wonTasks.length,
+                dimensions: evaluation.dimensions,
+                confidence_rating: avgConf > 0.7 ? 'High' : avgConf > 0.4 ? 'Medium' : 'Low'
+            };
+        }).sort((a, b) => b.overall_score - a.overall_score); // Sort by highest score
+    }, [evaluation]);
+
+    const comparisonCandidates = useMemo(
+        () => fallbackSummaries.slice(0, CANDIDATE_COLORS.length).map(candidate => candidate.candidate_id),
+        [fallbackSummaries]
+    );
+
+    const comparisonData = useMemo(() => {
+        const allocations = evaluation?.work_allocation || [];
+
+        return allocations.map(alloc => {
+            const row = { task: alloc.task_title };
+
+            comparisonCandidates.forEach(candidateId => {
+                const candidateScore = alloc.top_candidates?.find(tc => tc.candidate_id === candidateId);
+                if (candidateScore) {
+                    row[candidateId] = candidateScore.score;
+                } else if (alloc.recommended_candidate === candidateId) {
+                    row[candidateId] = alloc.confidence || 0;
+                } else {
+                    row[candidateId] = 0;
+                }
+            });
+
+            return row;
+        });
+    }, [evaluation, comparisonCandidates]);
+
+    if (loading) return (
+        // ... loading state ...
+        <div className="flex flex-col items-center justify-center min-h-[60vh]">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent mb-4"></div>
+            <h2 className="heading-2">Evaluating Proofs...</h2>
+            <p className="text-gray-500 mt-2">Extracting signals • Allocating tasks • Verifying constraints</p>
+        </div>
+    );
+
+    if (!evaluation) return (
+        // ... error state ...
+        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
+            <AlertTriangle className="w-12 h-12 text-yellow-500 mb-4" />
+            <h2 className="heading-2">Evaluation Not Ready</h2>
+            <p className="text-gray-500 mt-2 max-w-md">The system is still processing signals. Please wait a moment.</p>
+            <button onClick={() => window.location.reload()} className="btn btn-primary mt-6">
+                Refresh Status
+            </button>
+        </div>
+    );
+
+    // If a candidate is selected, show their detail view
+    if (selectedCandidate) {
+        const candidateData = fallbackSummaries.find(c => c.candidate_id === selectedCandidate);
+        if (!candidateData) {
+            setSelectedCandidate(null); // Safety fallback
+            return null;
+        }
+        return (
+            <CandidateDetailView
+                candidate={candidateData}
+                jobId={evaluation.job_id}
+                allAllocations={evaluation.work_allocation || []}
+                allSummaries={fallbackSummaries}
+                onBack={() => setSelectedCandidate(null)}
+                onHire={(name) => handleAction('hire', name)}
+                onReject={(name) => handleAction('reject', name)}
+                processing={processing}
+            />
+        );
+    }
+
+    // DASHBOARD VIEW
+    return (
+        <div className="max-w-7xl mx-auto px-4 py-8 flex items-start gap-8">
+
+            {/* NEW: Sticky Sidebar Navigation (Desktop) */}
+            <nav className="hidden lg:block w-64 sticky top-8 bg-white/80 rounded-xl border border-gray-200 shadow-sm p-4 space-y-1 backdrop-blur">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest px-3 mb-2">Navigation</h3>
+                <a href="#dashboard" className="flex items-center gap-3 px-3 py-2 text-sm font-medium text-text-secondary hover:bg-primary-soft hover:text-primary rounded-lg transition-colors">
+                    <BarChart3 className="w-4 h-4" />
+                    Dashboard
+                </a>
+                <a href="#decision" className="flex items-center gap-3 px-3 py-2 text-sm font-medium text-text-secondary hover:bg-primary-soft hover:text-primary rounded-lg transition-colors">
+                    <CheckCircle className="w-4 h-4" />
+                    Hiring Decision
+                </a>
+                <a href="#candidates" className="flex items-center gap-3 px-3 py-2 text-sm font-medium text-text-secondary hover:bg-primary-soft hover:text-primary rounded-lg transition-colors">
+                    <Users className="w-4 h-4" />
+                    Evaluated Candidates
+                </a>
+                <a href="#comparison" className="flex items-center gap-3 px-3 py-2 text-sm font-medium text-text-secondary hover:bg-primary-soft hover:text-primary rounded-lg transition-colors">
+                    <TrendingUp className="w-4 h-4" />
+                    Comparison
+                </a>
+                <a href="#signals" className="flex items-center gap-3 px-3 py-2 text-sm font-medium text-text-secondary hover:bg-primary-soft hover:text-primary rounded-lg transition-colors">
+                    <Shield className="w-4 h-4" />
+                    System Signals
+                </a>
+            </nav>
+
+            {/* Main Content Area */}
+            <div className="flex-1 min-w-0 space-y-8">
+
+                {/* Header */}
+                <div id="dashboard" className="mb-8 scroll-mt-8">
+                    <h1 className="text-3xl font-bold text-text-primary">{evaluation.job_title || 'Evaluation Dashboard'}</h1>
+                    <p className="text-text-secondary mt-1 font-mono text-sm">Job ID: {evaluation.job_id}</p>
+                    {anonymized && (
+                        <div className="mt-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-soft text-primary">
+                            <Shield className="w-3 h-3 mr-1" /> Anonymized Mode
+                        </div>
+                    )}
+                </div>
+
+                {/* Fit Score Summary Card */}
+                <div className="hero-gradient rounded-2xl p-8 text-white mb-8 shadow-xl">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                        <div>
+                            <h2 className="text-lg font-medium opacity-80">Overall Fit Score</h2>
+                            <div className="flex items-baseline gap-2 mt-2">
+                                <span className="text-5xl font-black">{Math.round(evaluation.fit_score * 100)}</span>
+                                <span className="text-2xl font-medium opacity-70">%</span>
+                            </div>
+                            <p className="text-sm opacity-70 mt-2">Based on {evaluation.work_allocation.length} tasks</p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                            <div className="flex items-center gap-2 bg-white/20 rounded-full px-4 py-2">
+                                <Users className="w-5 h-5" />
+                                <span className="font-semibold">{fallbackSummaries.length} Candidates Evaluated</span>
+                            </div>
+                            <div className="text-sm opacity-70">
+                                {evaluation.global_signals_used?.length || 0} signals analyzed
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Decision Panel - Prominently Placed */}
+                <div id="decision" className="bg-white rounded-2xl border-2 border-primary/30 shadow-lg p-8 mb-8 scroll-mt-24">
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="w-10 h-10 bg-primary-soft rounded-xl flex items-center justify-center">
+                            <CheckCircle className="w-6 h-6 text-primary" />
+                        </div>
+                        <h2 className="text-2xl font-bold text-text-primary">Hiring Decision</h2>
+                    </div>
+
+                    {feedbackGiven ? (
+                        <div className="text-center py-6">
+                            <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                            <p className="text-xl font-semibold text-gray-900">Decision Recorded</p>
+                            <p className="text-text-secondary mt-2">
+                                {(() => {
+                                    const hiredList = evaluation.decision?.selected_candidates ||
+                                        (evaluation.decision?.selected_candidate ? [evaluation.decision.selected_candidate] : []);
+
+                                    if (hiredList.length > 0) {
+                                        return `Selected (${hiredList.length}): ${hiredList.join(', ')}`;
+                                    }
+                                    return evaluation.decision?.action_taken === 'reject_all' ? 'Rejected All candidates' : 'Decision recorded';
+                                })()}
+                            </p>
+                            <button
+                                onClick={async () => {
+                                    if (window.confirm('Are you sure you want to change your decision?')) {
+                                        try {
+                                            await resetDecision(evaluation.job_id);
+                                            setFeedbackGiven(false);
+                                            // Reset local state to reflect change immediately
+                                            setEvaluation(prev => ({ ...prev, decision: null }));
+                                            alert('Decision reset.');
+                                        } catch (e) {
+                                            alert('Error: ' + e.message);
+                                        }
+                                    }
+                                }}
+                                className="btn btn-secondary mt-6"
+                            >
+                                <RotateCcw className="w-4 h-4 mr-2" />
+                                Change Decision
+                            </button>
+                        </div>
+                    ) : (
+                        <div>
+                            <p className="text-text-secondary mb-6">
+                                Select a candidate below to view their detailed report, or make a quick decision here.
+                            </p>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <button
+                                    onClick={() => handleAction('reject_all')}
+                                    disabled={processing}
+                                    className="btn bg-white text-red-600 border-2 border-red-200 hover:bg-red-50 px-6 py-2.5 disabled:opacity-50 flex items-center justify-center gap-2 text-sm font-semibold"
+                                >
+                                    <XCircle className="w-4 h-4" />
+                                    Reject All
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Candidates Section */}
+                <div id="candidates" className="mb-8 scroll-mt-24">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-xl font-bold text-text-primary flex items-center gap-2">
+                            <Users className="w-6 h-6 text-primary" />
+                            Evaluated Candidates
+                        </h2>
+                        <span className="text-sm text-text-secondary font-medium bg-primary-soft px-3 py-1 rounded-full">
+                            Showing All ({fallbackSummaries.length})
+                        </span>
+                    </div>
+
+                    {fallbackSummaries.length === 0 ? (
+                        <div className="bg-gray-50 rounded-xl p-8 text-center border border-gray-200 border-dashed">
+                            <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                            <p className="text-gray-500">No candidates matched the requirements.</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                            {fallbackSummaries.map((candidate, idx) => (
+                                <div
+                                    key={candidate.candidate_id}
+                                    className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-primary transition-all overflow-hidden flex flex-col"
+                                >
+                                    {/* Rank Badge */}
+                                    {idx < 3 && (
+                                        <div className={`h-1 ${idx === 0 ? 'bg-accent' : idx === 1 ? 'bg-gray-300' : 'bg-primary'}`}></div>
+                                    )}
+
+                                    <div className="p-6 flex-1">
+                                        <div className="flex items-start justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-12 h-12 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center text-white text-lg font-bold shadow-sm">
+                                                    {candidate.candidate_id.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold text-gray-900 truncate max-w-[120px]" title={candidate.candidate_id}>{candidate.candidate_id}</h3>
+                                                    <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium border ${getConfidenceBadge(candidate.confidence_rating)}`}>
+                                                        {candidate.confidence_rating}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <span className={`text-2xl font-bold ${getScoreColor(candidate.overall_score)}`}>
+                                                {Math.round(candidate.overall_score * 100)}%
+                                            </span>
+                                        </div>
+
+                                        <div className="text-sm text-gray-600 mb-6">
+                                            <span className="font-semibold text-gray-900">{candidate.tasks_won}</span> tasks passed
+                                        </div>
+
+                                        <div className="flex flex-col gap-2 mt-auto">
+                                            <button
+                                                onClick={() => setSelectedCandidate(candidate.candidate_id)}
+                                                disabled={processing}
+                                                className="w-full btn bg-primary-soft text-primary hover:bg-primary/10 border border-primary/30 py-2.5 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                                            >
+                                                <Eye className="w-4 h-4" />
+                                                View Report
+                                            </button>
+
+                                            {/* Show Hire Button OR Hired/Rejected Status */}
+                                            {(() => {
+                                                const hiredList = evaluation.decision?.selected_candidates ||
+                                                    (evaluation.decision?.selected_candidate ? [evaluation.decision.selected_candidate] : []);
+                                                const rejectedList = evaluation.decision?.rejected_candidates || [];
+
+                                                const isHired = hiredList.includes(candidate.candidate_id);
+                                                const isRejected = rejectedList.includes(candidate.candidate_id);
+                                                const isRejectAll = evaluation.decision?.action_taken === 'reject_all';
+
+                                                if (isHired) {
+                                                    return (
+                                                        <div className="w-full px-4 py-2.5 bg-green-100 text-green-700 border border-green-200 rounded-lg flex items-center justify-center gap-2 font-bold text-sm">
+                                                            <CheckCircle className="w-4 h-4" /> HIRED
+                                                        </div>
+                                                    );
+                                                }
+
+                                                if (isRejected || isRejectAll) {
+                                                    return (
+                                                        <div className="w-full px-4 py-2.5 bg-red-100 text-red-700 border border-red-200 rounded-lg flex items-center justify-center gap-2 text-sm font-medium">
+                                                            <XCircle className="w-4 h-4" /> Rejected
+                                                        </div>
+                                                    );
+                                                }
+
+                                                // Default: Show Hire Button
+                                                return (
+                                                    <button
+                                                        onClick={() => handleAction('hire', candidate.candidate_id)}
+                                                        disabled={processing}
+                                                        className="w-full btn bg-green-600 hover:bg-green-700 text-white py-2.5 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                                                    >
+                                                        {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle className="w-4 h-4" /> Proceed to Interview</>}
+                                                    </button>
+                                                );
+                                            })()}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Candidate Comparison Panel */}
+                <div id="comparison" className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-8 scroll-mt-24">
+                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                        <TrendingUp className="w-5 h-5 text-primary" />
+                        Candidate Comparison
+                    </h3>
+
+                    {fallbackSummaries.length < 2 || comparisonData.length === 0 ? (
+                        <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500 border border-gray-100">
+                            <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p>Only one candidate evaluated. Comparison unavailable.</p>
+                            <p className="text-xs mt-1">Add more candidates to see side-by-side performance.</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                            <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-3">Candidate Skill Overview</h4>
+                                <div className="h-80 w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <RadarChart cx="50%" cy="50%" outerRadius="80%" data={comparisonData}>
+                                            <PolarGrid stroke="#e5e7eb" />
+                                            <PolarAngleAxis dataKey="task" tick={{ fill: '#4b5563', fontSize: 12 }} />
+                                            <PolarRadiusAxis angle={30} domain={[0, 1]} tick={{ fill: '#9ca3af' }} />
+                                            <Tooltip formatter={(value) => `${Math.round(value * 100)}%`} />
+                                            <Legend />
+                                            {comparisonCandidates.map((candidate, index) => (
+                                                <Radar
+                                                    key={candidate}
+                                                    name={candidate}
+                                                    dataKey={candidate}
+                                                    stroke={CANDIDATE_COLORS[index % CANDIDATE_COLORS.length]}
+                                                    fill={CANDIDATE_COLORS[index % CANDIDATE_COLORS.length]}
+                                                    fillOpacity={0.4}
+                                                />
+                                            ))}
+                                        </RadarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 className="text-sm font-semibold text-gray-700 mb-3">Task Confidence Breakdown</h4>
+                                <div className="h-80 w-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={comparisonData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                            <XAxis
+                                                dataKey="task"
+                                                tick={{ fill: '#4b5563', fontSize: 12 }}
+                                                axisLine={false}
+                                                tickLine={false}
+                                            />
+                                            <YAxis
+                                                domain={[0, 1]}
+                                                tick={{ fill: '#9ca3af' }}
+                                                axisLine={false}
+                                                tickLine={false}
+                                                tickFormatter={(value) => `${Math.round(value * 100)}%`}
+                                            />
+                                            <Tooltip
+                                                formatter={(value) => `${Math.round(value * 100)}%`}
+                                                contentStyle={{ borderRadius: '0.5rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                            />
+                                            <Legend />
+                                            {comparisonCandidates.map((candidate, index) => (
+                                                <Bar
+                                                    key={candidate}
+                                                    name={candidate}
+                                                    dataKey={candidate}
+                                                    fill={CANDIDATE_COLORS[index % CANDIDATE_COLORS.length]}
+                                                    radius={[4, 4, 0, 0]}
+                                                    maxBarSize={40}
+                                                />
+                                            ))}
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* System Signals */}
+                <div id="signals" className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 scroll-mt-24">
+                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                        <Shield className="w-5 h-5 text-primary" />
+                        System Signals Analysis
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                        {evaluation.global_signals_used?.map((signal) => (
+                            <span key={signal} className="px-3 py-1.5 bg-primary-soft text-primary rounded-lg text-sm border border-primary/20 font-mono hover:bg-primary/10 transition-colors">
+                                {signal}
+                            </span>
+                        ))}
+                        {(!evaluation.global_signals_used || evaluation.global_signals_used.length === 0) && (
+                            <span className="text-gray-400 text-sm italic">No specific signals were triggered during this evaluation.</span>
+                        )}
+                    </div>
+                </div>
+
+            </div>
+
+            {/* FEEDBACK MODAL */}
+            <FeedbackModal
+                isOpen={feedbackModalOpen}
+                onClose={() => setFeedbackModalOpen(false)}
+                job={{ id: evaluation?.job_id }}
+                candidateName={lastAction.candidate}
+                action={lastAction.type || 'hire'}
+                tasks={[...new Set(evaluation?.work_allocation?.map(a => a.task_title) || [])]}
+            />
+        </div>
+    );
+}
