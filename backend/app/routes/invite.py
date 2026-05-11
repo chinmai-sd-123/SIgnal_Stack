@@ -22,6 +22,23 @@ def _get_candidate_id(submission: InviteSubmission) -> str:
     return submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
 
 
+def _proof_payload_for_submission(submission: InviteSubmission):
+    """Build the evaluator payload for an invite submission."""
+    return {
+        "repo_url": submission.repo_url or "",
+        "github_username": submission.github_username or "",
+        "leetcode_username": submission.leetcode_username or "",
+        "artifact_link": "" if submission.repo_url else (submission.resume_url or ""),
+        "resume_url": submission.resume_url or "",
+        "context": submission.context or "",
+        "candidate_name": submission.candidate_name,
+        "candidate_email": submission.candidate_email,
+        "linkedin_url": submission.linkedin_url or "",
+        "source": "invite",
+        "invite_submission_id": submission.id,
+    }
+
+
 def _create_proofs_for_submission(db: Session, submission: InviteSubmission, job_id: str):
     """Create Proof records across all outcomes for a candidate submission."""
     candidate_id = _get_candidate_id(submission)
@@ -41,18 +58,7 @@ def _create_proofs_for_submission(db: Session, submission: InviteSubmission, job
             outcome_id=outcome.id,
             candidate_id=candidate_id,
             type="github" if submission.repo_url else "work_artifact",
-            payload_json={
-                "repo_url": submission.repo_url or "",
-                "leetcode_username": submission.leetcode_username or "",
-                "artifact_link": "" if submission.repo_url else (submission.resume_url or ""),
-                "resume_url": submission.resume_url or "",
-                "context": submission.context or "",
-                "candidate_name": submission.candidate_name,
-                "candidate_email": submission.candidate_email,
-                "linkedin_url": submission.linkedin_url or "",
-                "source": "invite",
-                "invite_submission_id": submission.id,
-            },
+            payload_json=_proof_payload_for_submission(submission),
         )
         db.add(proof)
         created += 1
@@ -94,18 +100,7 @@ def _update_proofs_for_submission(db: Session, submission: InviteSubmission, old
             # Update candidate_id if it changed
             proof.candidate_id = new_candidate_id
             proof.type = "github" if submission.repo_url else "work_artifact"
-            proof.payload_json = {
-                "repo_url": submission.repo_url or "",
-                "leetcode_username": submission.leetcode_username or "",
-                "artifact_link": "" if submission.repo_url else (submission.resume_url or ""),
-                "resume_url": submission.resume_url or "",
-                "context": submission.context or "",
-                "candidate_name": submission.candidate_name,
-                "candidate_email": submission.candidate_email,
-                "linkedin_url": submission.linkedin_url or "",
-                "source": "invite",
-                "invite_submission_id": submission.id,
-            }
+            proof.payload_json = _proof_payload_for_submission(submission)
 
 
 # ─── Recruiter endpoints ────────────────────────────────────────────────────
