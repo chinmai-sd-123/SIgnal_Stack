@@ -75,3 +75,20 @@ def get_audit_logs(db: Session = Depends(get_db)):
 def get_feedback_list(db: Session = Depends(get_db)):
     feedback = crud.get_feedback_list(db)
     return [{"id": f.id, "job_id": f.job_id, "result": f.result, "metrics": f.metrics_json, "created_at": f.created_at.isoformat()} for f in feedback]
+
+@router.get("/admin/llm-logs")
+def get_all_llm_logs(db: Session = Depends(get_db)):
+    from app.models.snapshot import LLMLog
+    logs = db.query(LLMLog).order_by(LLMLog.created_at.desc()).limit(50).all()
+    return [
+        {
+            "id": l.id,
+            "evaluation_id": l.evaluation_id,
+            "prompt": l.prompt,
+            "raw_response": l.raw_response,
+            "latency_ms": l.latency_ms,
+            "is_valid": l.is_valid,
+            "created_at": l.created_at.isoformat() if l.created_at else None
+        } for l in logs
+    ]
+
