@@ -1,6 +1,11 @@
 import pytest
 
-from app.pipeline.evaluator import _candidate_quality
+from app.pipeline.evaluator import (
+    _accumulate_dimensions,
+    _average_dimension_accumulator,
+    _candidate_quality,
+    Evaluator,
+)
 from app.schemas.evaluation import CandidateScore
 from app.schemas.proof import Evidence
 
@@ -64,3 +69,54 @@ def test_candidate_score_can_carry_candidate_specific_evidence():
 
     assert dumped["evidence"][0]["ref"] == "FILE:candidate_b/app.py"
     assert "candidate-b/repo" in dumped["evidence"][0]["source_url"]
+
+
+@pytest.mark.unit
+def test_dimension_accumulator_averages_multiple_task_scores():
+    accumulator = None
+    accumulator = _accumulate_dimensions(
+        accumulator,
+        {
+            "project_completion": 8,
+            "engineering_quality": 6,
+            "communication": 4,
+            "innovation": 5,
+            "depth_novelty": 7,
+        },
+    )
+    accumulator = _accumulate_dimensions(
+        accumulator,
+        {
+            "project_completion": 4,
+            "engineering_quality": 8,
+            "communication": 6,
+            "innovation": 7,
+            "depth_novelty": 5,
+        },
+    )
+
+    averaged = _average_dimension_accumulator(accumulator)
+
+    assert averaged == {
+        "project_completion": 6.0,
+        "engineering_quality": 7.0,
+        "communication": 5.0,
+        "innovation": 6.0,
+        "depth_novelty": 6.0,
+    }
+
+
+@pytest.mark.unit
+def test_task_context_includes_outcome_and_signal_text():
+    class Outcome:
+        title = "AI Health Monitoring"
+        description = "Evaluate health risk prediction projects"
+
+    class Task:
+        name = "Train baseline model and report F1 score"
+
+    context = Evaluator()._build_task_context(Outcome(), Task())
+
+    assert "Outcome: AI Health Monitoring" in context
+    assert "Outcome Description: Evaluate health risk prediction projects" in context
+    assert "Signal: Train baseline model and report F1 score" in context

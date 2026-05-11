@@ -26,6 +26,34 @@ def _avg_dimensions(summaries: List) -> Dict:
     return {k: round(v / count, 2) for k, v in dim_totals.items()}
 
 
+def _accumulate_dimensions(current: Dict, dims: Dict) -> Dict:
+    """Accumulate task-level dimension scores for later averaging."""
+    if not dims:
+        return current
+
+    if current is None:
+        current = {"totals": {}, "count": 0}
+
+    current["count"] += 1
+    for key, value in dims.items():
+        try:
+            current["totals"][key] = current["totals"].get(key, 0.0) + float(value or 0.0)
+        except (TypeError, ValueError):
+            current["totals"][key] = current["totals"].get(key, 0.0)
+    return current
+
+
+def _average_dimension_accumulator(accumulator: Dict) -> Dict:
+    """Convert accumulated task dimensions into radar-chart values."""
+    if not accumulator or accumulator.get("count", 0) <= 0:
+        return None
+    count = accumulator["count"]
+    return {
+        key: round(value / count, 2)
+        for key, value in accumulator.get("totals", {}).items()
+    }
+
+
 def _production_readiness(signals: Dict) -> float:
     """Score production hygiene separately from capability."""
     checks = {
@@ -120,6 +148,7 @@ class Evaluator:
         
         # For each task, evaluate all candidates and pick the best
         for task in outcome.tasks:
+            task_context = self._build_task_context(outcome, task)
             best_candidate = None
             best_score = 0.0
             best_reasons = []
@@ -162,7 +191,7 @@ class Evaluator:
                 # Extract evidence specific to this task
                 task_evidence = self.extractor.extract_evidence(
                     repo_url=repo_url, 
-                    task_title=task.name,
+                    task_title=task_context,
                     context=context_desc,
                     artifact_link=artifact_link
                 )
@@ -174,7 +203,7 @@ class Evaluator:
                     authorship_evidence = self.extractor.extract_authorship_signals(
                         repo_url,
                         cand_id,
-                        task.name,
+                        task_context,
                         candidate_info=proof.payload,                              # ← identity fields
                         cached_author_map=signals_map.get(cand_id, {}).get("_author_map"),  # ← skip re-fetch
                     )
@@ -212,7 +241,7 @@ class Evaluator:
                 # snippets reach the LLM before generic manifests or README.
                 evidence_dicts = [e.model_dump() for e in task_evidence]
                 interpretation = llm.interpret_signals(
-                    task.description if hasattr(task, 'description') else task.name, 
+                    task_context,
                     evidence_dicts,
                     payload=proof.payload
                 )
@@ -246,8 +275,11 @@ class Evaluator:
                 # Update candidate stats
                 candidate_stats[cand_id]['total_score'] += score
                 candidate_stats[cand_id]['task_count'] += 1
-                if dims and not candidate_stats[cand_id]['dimensions']:
-                    candidate_stats[cand_id]['dimensions'] = dims
+                if dims:
+                    candidate_stats[cand_id]['dimensions'] = _accumulate_dimensions(
+                        candidate_stats[cand_id]['dimensions'],
+                        dims,
+                    )
                 
                 # Track best candidate for this task
                 if score > best_score:
@@ -320,7 +352,7 @@ class Evaluator:
                 production_readiness=quality["production_readiness"],
                 verification_status=quality["verification_status"],
                 tasks_won=stats['wins'],
-                dimensions=stats['dimensions'],
+                dimensions=_average_dimension_accumulator(stats['dimensions']),
                 confidence_rating=quality["confidence_rating"],
                 risk_flags=quality["risk_flags"],
             ))
@@ -366,3 +398,14 @@ class Evaluator:
             dimensions=_avg_dimensions(candidate_summaries),
             candidate_summaries=candidate_summaries
         )
+
+    def _build_task_context(self, outcome, task) -> str:
+        """Combine outcome and task text so signal extraction has domain context."""
+        parts = []
+        if getattr(outcome, "title", None):
+            parts.append(f"Outcome: {outcome.title}")
+        if getattr(outcome, "description", None):
+            parts.append(f"Outcome Description: {outcome.description}")
+        if getattr(task, "name", None):
+            parts.append(f"Signal: {task.name}")
+        return "\n".join(parts) or getattr(task, "name", "")
