@@ -388,3 +388,21 @@ export async function deleteInvite(inviteId) {
     return response.json();
 }
 
+export async function deleteSubmission(submissionId) {
+    const response = await fetch(`${API_URL}/submissions/${submissionId}`, {
+        method: "DELETE",
+    });
+    if (!response.ok) throw new Error("Failed to delete submission");
+    return response.json();
+}
+
+export async function updateSubmission(submissionId, data) {
+    const response = await fetch(`${API_URL}/submissions/${submissionId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error("Failed to update submission");
+    return response.json();
+}
+

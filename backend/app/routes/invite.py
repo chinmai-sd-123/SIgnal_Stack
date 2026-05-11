@@ -6,17 +6,110 @@ import uuid
 from app.config.database import get_db
 from app.models.invite import Invite, InviteSubmission
 from app.models.job import Job
+from app.models.outcome import Outcome
+from app.models.proof import Proof
 
 router = APIRouter(tags=["Invites"])
 
 INVITE_EXPIRY_DAYS = 7
 
 
+# ─── Helper: manage proof lifecycle ─────────────────────────────────────────
+
+def _get_candidate_id(submission: InviteSubmission) -> str:
+    """Derive a stable candidate_id from submission data."""
+    return submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
+
+
+def _create_proofs_for_submission(db: Session, submission: InviteSubmission, job_id: str):
+    """Create Proof records across all outcomes for a candidate submission."""
+    candidate_id = _get_candidate_id(submission)
+    outcomes = db.query(Outcome).filter(Outcome.job_id == job_id).all()
+
+    created = 0
+    for outcome in outcomes:
+        # Skip if proof already exists
+        existing = db.query(Proof).filter(
+            Proof.outcome_id == outcome.id,
+            Proof.candidate_id == candidate_id,
+        ).first()
+        if existing:
+            continue
+
+        proof = Proof(
+            outcome_id=outcome.id,
+            candidate_id=candidate_id,
+            type="github" if submission.repo_url else "work_artifact",
+            payload_json={
+                "repo_url": submission.repo_url or "",
+                "leetcode_username": submission.leetcode_username or "",
+                "artifact_link": submission.resume_url or "",
+                "context": submission.context or "",
+                "candidate_name": submission.candidate_name,
+                "candidate_email": submission.candidate_email,
+                "linkedin_url": submission.linkedin_url or "",
+                "source": "invite",
+                "invite_submission_id": submission.id,
+            },
+        )
+        db.add(proof)
+        created += 1
+
+    return created
+
+
+def _delete_proofs_for_submission(db: Session, submission: InviteSubmission):
+    """Delete all Proof records associated with a submission."""
+    candidate_id = _get_candidate_id(submission)
+    # Delete proofs that were created from this submission
+    proofs = db.query(Proof).filter(
+        Proof.candidate_id == candidate_id,
+    ).all()
+
+    deleted = 0
+    for proof in proofs:
+        # Only delete proofs that came from invite system
+        payload = proof.payload_json or {}
+        if payload.get("source") == "invite" and payload.get("invite_submission_id") == submission.id:
+            db.delete(proof)
+            deleted += 1
+
+    return deleted
+
+
+def _update_proofs_for_submission(db: Session, submission: InviteSubmission, old_candidate_id: str):
+    """Update all Proof records when submission data changes."""
+    new_candidate_id = _get_candidate_id(submission)
+
+    # Find proofs linked to this submission
+    proofs = db.query(Proof).filter(
+        Proof.candidate_id == old_candidate_id,
+    ).all()
+
+    for proof in proofs:
+        payload = proof.payload_json or {}
+        if payload.get("source") == "invite" and payload.get("invite_submission_id") == submission.id:
+            # Update candidate_id if it changed
+            proof.candidate_id = new_candidate_id
+            proof.type = "github" if submission.repo_url else "work_artifact"
+            proof.payload_json = {
+                "repo_url": submission.repo_url or "",
+                "leetcode_username": submission.leetcode_username or "",
+                "artifact_link": submission.resume_url or "",
+                "context": submission.context or "",
+                "candidate_name": submission.candidate_name,
+                "candidate_email": submission.candidate_email,
+                "linkedin_url": submission.linkedin_url or "",
+                "source": "invite",
+                "invite_submission_id": submission.id,
+            }
+
+
 # ─── Recruiter endpoints ────────────────────────────────────────────────────
 
 @router.post("/jobs/{job_id}/invites")
 def create_invite(job_id: str, db: Session = Depends(get_db)):
-    """Generate a reusable invite link for a job. Multiple candidates can use it."""
+    """Generate a reusable invite link for a job."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -45,7 +138,7 @@ def create_invite(job_id: str, db: Session = Depends(get_db)):
 
 @router.get("/jobs/{job_id}/invites")
 def list_invites(job_id: str, db: Session = Depends(get_db)):
-    """List all invites for a job with their submissions (recruiter view)."""
+    """List all invites for a job with their submissions."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -89,14 +182,102 @@ def list_invites(job_id: str, db: Session = Depends(get_db)):
 
 @router.delete("/invites/{invite_id}")
 def revoke_invite(invite_id: str, db: Session = Depends(get_db)):
-    """Revoke/delete an invite and all its submissions."""
+    """Revoke an invite — also deletes all submissions AND their proofs from outcomes."""
     invite = db.query(Invite).filter(Invite.id == invite_id).first()
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
 
+    # First, delete all proofs linked to this invite's submissions
+    submissions = db.query(InviteSubmission).filter(InviteSubmission.invite_id == invite.id).all()
+    total_proofs_deleted = 0
+    for sub in submissions:
+        total_proofs_deleted += _delete_proofs_for_submission(db, sub)
+
+    # Then delete the invite (CASCADE deletes submissions)
     db.delete(invite)
     db.commit()
-    return {"message": "Invite revoked", "id": invite_id}
+
+    print(f"[OK] Revoked invite {invite_id}: deleted {len(submissions)} submissions, {total_proofs_deleted} proofs")
+    return {
+        "message": "Invite revoked",
+        "id": invite_id,
+        "submissions_deleted": len(submissions),
+        "proofs_deleted": total_proofs_deleted,
+    }
+
+
+# ─── Submission management (recruiter) ──────────────────────────────────────
+
+@router.delete("/submissions/{submission_id}")
+def delete_submission(submission_id: str, db: Session = Depends(get_db)):
+    """Delete a single candidate submission and its proofs from all outcomes."""
+    submission = db.query(InviteSubmission).filter(InviteSubmission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    # Delete linked proofs first
+    proofs_deleted = _delete_proofs_for_submission(db, submission)
+
+    # Delete the submission
+    db.delete(submission)
+    db.commit()
+
+    print(f"[OK] Deleted submission {submission_id}: {proofs_deleted} proofs removed")
+    return {
+        "message": "Candidate removed",
+        "id": submission_id,
+        "proofs_deleted": proofs_deleted,
+    }
+
+
+@router.put("/submissions/{submission_id}")
+def update_submission(submission_id: str, data: dict, db: Session = Depends(get_db)):
+    """Edit a candidate's submission details. Also updates linked proofs."""
+    submission = db.query(InviteSubmission).filter(InviteSubmission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    # Track old candidate_id before update (for proof relinking)
+    old_candidate_id = _get_candidate_id(submission)
+
+    # Update fields
+    if "candidate_name" in data:
+        submission.candidate_name = data["candidate_name"]
+    if "candidate_email" in data:
+        submission.candidate_email = data["candidate_email"]
+    if "github_username" in data:
+        submission.github_username = data["github_username"]
+    if "repo_url" in data:
+        submission.repo_url = data["repo_url"]
+    if "linkedin_url" in data:
+        submission.linkedin_url = data["linkedin_url"]
+    if "resume_url" in data:
+        submission.resume_url = data["resume_url"]
+    if "leetcode_username" in data:
+        submission.leetcode_username = data["leetcode_username"]
+    if "context" in data:
+        submission.context = data["context"]
+
+    # Update linked proofs
+    _update_proofs_for_submission(db, submission, old_candidate_id)
+
+    db.commit()
+    db.refresh(submission)
+
+    print(f"[OK] Updated submission {submission_id}")
+    return {
+        "id": submission.id,
+        "candidate_name": submission.candidate_name,
+        "candidate_email": submission.candidate_email,
+        "github_username": submission.github_username,
+        "repo_url": submission.repo_url,
+        "linkedin_url": submission.linkedin_url,
+        "resume_url": submission.resume_url,
+        "leetcode_username": submission.leetcode_username,
+        "context": submission.context,
+        "status": submission.status,
+        "submitted_at": submission.submitted_at.isoformat() if submission.submitted_at else None,
+    }
 
 
 # ─── Candidate (public) endpoints ───────────────────────────────────────────
@@ -118,8 +299,6 @@ def get_invite(token: str, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job no longer exists")
 
-    # Fetch outcomes for the job
-    from app.models.outcome import Outcome
     outcomes = db.query(Outcome).filter(Outcome.job_id == job.id).all()
 
     return {
@@ -147,7 +326,7 @@ def get_invite(token: str, db: Session = Depends(get_db)):
 
 @router.post("/invites/{token}/submit")
 def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
-    """Candidate submits their application via the invite link. Link stays reusable."""
+    """Candidate submits their application via the invite link."""
     invite = db.query(Invite).filter(Invite.token == token).first()
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
@@ -186,44 +365,11 @@ def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(submission)
 
-    # Create Proof records for each outcome in the job so candidates
-    # appear in OutcomeDashboard and can be evaluated
+    # Create Proof records for each outcome
     try:
-        from app.models.outcome import Outcome
-        from app.models.proof import Proof
-
-        candidate_id = submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
-        outcomes = db.query(Outcome).filter(Outcome.job_id == invite.job_id).all()
-
-        for outcome in outcomes:
-            # Check if proof already exists for this candidate + outcome
-            existing_proof = db.query(Proof).filter(
-                Proof.outcome_id == outcome.id,
-                Proof.candidate_id == candidate_id,
-            ).first()
-            if existing_proof:
-                continue
-
-            proof = Proof(
-                outcome_id=outcome.id,
-                candidate_id=candidate_id,
-                type="github" if submission.repo_url else "work_artifact",
-                payload_json={
-                    "repo_url": submission.repo_url or "",
-                    "leetcode_username": submission.leetcode_username or "",
-                    "artifact_link": submission.resume_url or "",
-                    "context": submission.context or "",
-                    "candidate_name": submission.candidate_name,
-                    "candidate_email": submission.candidate_email,
-                    "linkedin_url": submission.linkedin_url or "",
-                    "source": "invite",
-                    "invite_submission_id": submission.id,
-                },
-            )
-            db.add(proof)
-
+        created = _create_proofs_for_submission(db, submission, invite.job_id)
         db.commit()
-        print(f"[OK] Created {len(outcomes)} proof(s) for invite submission {submission.id}")
+        print(f"[OK] Created {created} proof(s) for submission {submission.id}")
     except Exception as e:
         print(f"[WARN] Failed to create proofs for submission {submission.id}: {e}")
 
@@ -232,4 +378,3 @@ def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
         "submission_id": submission.id,
         "status": submission.status,
     }
-

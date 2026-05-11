@@ -4,9 +4,9 @@ import {
     Briefcase, MapPin, Building, IndianRupee, Clock,
     CheckCircle, Plus, ArrowLeft, ChevronRight, Trash2,
     Send, Copy, ExternalLink, UserPlus, X, RefreshCw,
-    Github, Linkedin, FileText, Code
+    Github, Linkedin, FileText, Code, Pencil
 } from 'lucide-react';
-import { getJob, getJobOutcomes, deleteJob, finalizeShortlist, archiveJob, createInvite, getJobInvites, deleteInvite } from '../api';
+import { getJob, getJobOutcomes, deleteJob, finalizeShortlist, archiveJob, createInvite, getJobInvites, deleteInvite, deleteSubmission, updateSubmission } from '../api';
 
 export default function JobDetail() {
     const { jobId } = useParams();
@@ -17,6 +17,8 @@ export default function JobDetail() {
     const [invites, setInvites] = useState([]);
     const [generatingInvite, setGeneratingInvite] = useState(false);
     const [copiedToken, setCopiedToken] = useState(null);
+    const [editingSub, setEditingSub] = useState(null); // submission id being edited
+    const [editForm, setEditForm] = useState({});
 
     useEffect(() => {
         async function loadJob() {
@@ -63,10 +65,52 @@ export default function JobDetail() {
     };
 
     const handleRevokeInvite = async (inviteId) => {
-        if (!window.confirm('Revoke this invite? The link will stop working.')) return;
+        if (!window.confirm('Revoke this invite link?\n\nThis will also remove all candidates submitted through this link from every outcome.')) return;
         try {
             await deleteInvite(inviteId);
             setInvites(invites.filter(i => i.id !== inviteId));
+        } catch (error) {
+            alert(`Failed: ${error.message}`);
+        }
+    };
+
+    const handleDeleteSubmission = async (submissionId) => {
+        if (!window.confirm('Delete this candidate?\n\nThis will also remove them from all outcome evaluations.')) return;
+        try {
+            await deleteSubmission(submissionId);
+            // Remove from local state
+            setInvites(invvs => invvs.map(inv => ({
+                ...inv,
+                submissions: inv.submissions.filter(s => s.id !== submissionId),
+                submission_count: inv.submissions.filter(s => s.id !== submissionId).length,
+            })));
+        } catch (error) {
+            alert(`Failed: ${error.message}`);
+        }
+    };
+
+    const handleEditSubmission = (sub) => {
+        setEditingSub(sub.id);
+        setEditForm({
+            candidate_name: sub.candidate_name || '',
+            candidate_email: sub.candidate_email || '',
+            github_username: sub.github_username || '',
+            repo_url: sub.repo_url || '',
+            linkedin_url: sub.linkedin_url || '',
+            resume_url: sub.resume_url || '',
+            leetcode_username: sub.leetcode_username || '',
+            context: sub.context || '',
+        });
+    };
+
+    const handleSaveSubmission = async (submissionId) => {
+        try {
+            const updated = await updateSubmission(submissionId, editForm);
+            setInvites(invvs => invvs.map(inv => ({
+                ...inv,
+                submissions: inv.submissions.map(s => s.id === submissionId ? { ...s, ...updated } : s),
+            })));
+            setEditingSub(null);
         } catch (error) {
             alert(`Failed: ${error.message}`);
         }
@@ -155,7 +199,7 @@ export default function JobDetail() {
                     </div>
                 </div>
 
-                    <div className="mt-6 pt-6 border-t border-gray-100">
+                <div className="mt-6 pt-6 border-t border-gray-100">
                     <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-2">Description</h3>
                     <p className="text-gray-600 whitespace-pre-line">{job.description}</p>
 
@@ -279,7 +323,7 @@ export default function JobDetail() {
                             const isExpired = inv.is_expired || (inv.expires_at && new Date(inv.expires_at) < new Date());
                             const statusColor = inv.status === 'active' && !isExpired ? 'bg-green-100 text-green-700'
                                 : isExpired ? 'bg-red-100 text-red-700'
-                                : 'bg-gray-100 text-gray-600';
+                                    : 'bg-gray-100 text-gray-600';
                             const statusLabel = isExpired ? 'Expired' : inv.status === 'active' ? 'Active' : inv.status;
                             const subs = inv.submissions || [];
 
@@ -334,63 +378,117 @@ export default function JobDetail() {
                                         <div className="divide-y divide-gray-100">
                                             {subs.map((sub) => (
                                                 <div key={sub.id} className="p-4 hover:bg-gray-50 transition-colors">
-                                                    {/* Candidate header */}
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <div className="flex items-center gap-2">
-                                                            <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-sm font-bold">
-                                                                {sub.candidate_name?.charAt(0)?.toUpperCase() || '?'}
+                                                    {editingSub === sub.id ? (
+                                                        /* ─── Edit Mode ─── */
+                                                        <div className="space-y-3">
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                <input type="text" placeholder="Name" value={editForm.candidate_name}
+                                                                    onChange={e => setEditForm({ ...editForm, candidate_name: e.target.value })}
+                                                                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                                                                <input type="email" placeholder="Email" value={editForm.candidate_email}
+                                                                    onChange={e => setEditForm({ ...editForm, candidate_email: e.target.value })}
+                                                                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                                                                <input type="text" placeholder="GitHub username" value={editForm.github_username}
+                                                                    onChange={e => setEditForm({ ...editForm, github_username: e.target.value })}
+                                                                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                                                                <input type="url" placeholder="Repository URL" value={editForm.repo_url}
+                                                                    onChange={e => setEditForm({ ...editForm, repo_url: e.target.value })}
+                                                                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                                                                <input type="url" placeholder="LinkedIn URL" value={editForm.linkedin_url}
+                                                                    onChange={e => setEditForm({ ...editForm, linkedin_url: e.target.value })}
+                                                                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                                                                <input type="url" placeholder="Resume URL" value={editForm.resume_url}
+                                                                    onChange={e => setEditForm({ ...editForm, resume_url: e.target.value })}
+                                                                    className="px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
                                                             </div>
-                                                            <div>
-                                                                <span className="font-medium text-gray-900">{sub.candidate_name}</span>
-                                                                <span className="text-gray-500 text-sm ml-2">{sub.candidate_email}</span>
+                                                            <textarea placeholder="Context / Notes" rows={2} value={editForm.context}
+                                                                onChange={e => setEditForm({ ...editForm, context: e.target.value })}
+                                                                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none" />
+                                                            <div className="flex gap-2">
+                                                                <button onClick={() => handleSaveSubmission(sub.id)}
+                                                                    className="px-4 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+                                                                    Save Changes
+                                                                </button>
+                                                                <button onClick={() => setEditingSub(null)}
+                                                                    className="px-4 py-1.5 bg-gray-100 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-200 transition-colors">
+                                                                    Cancel
+                                                                </button>
                                                             </div>
                                                         </div>
-                                                        <span className="text-xs text-gray-400">
-                                                            {sub.submitted_at && new Date(sub.submitted_at).toLocaleDateString()}
-                                                        </span>
-                                                    </div>
+                                                    ) : (
+                                                        /* ─── View Mode ─── */
+                                                        <>
+                                                            {/* Candidate header */}
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-sm font-bold">
+                                                                        {sub.candidate_name?.charAt(0)?.toUpperCase() || '?'}
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="font-medium text-gray-900">{sub.candidate_name}</span>
+                                                                        <span className="text-gray-500 text-sm ml-2">{sub.candidate_email}</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center gap-1">
+                                                                    <span className="text-xs text-gray-400 mr-2">
+                                                                        {sub.submitted_at && new Date(sub.submitted_at).toLocaleDateString()}
+                                                                    </span>
+                                                                    <button onClick={() => handleEditSubmission(sub)}
+                                                                        className="p-1.5 rounded-md hover:bg-indigo-50 text-gray-400 hover:text-indigo-600 transition-colors"
+                                                                        title="Edit candidate">
+                                                                        <Pencil className="w-3.5 h-3.5" />
+                                                                    </button>
+                                                                    <button onClick={() => handleDeleteSubmission(sub.id)}
+                                                                        className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                                                                        title="Delete candidate">
+                                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
 
-                                                    {/* Action buttons */}
-                                                    <div className="flex flex-wrap gap-2 mb-2">
-                                                        {sub.github_username && (
-                                                            <a href={`https://github.com/${sub.github_username}`} target="_blank" rel="noopener noreferrer"
-                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-700 transition-colors">
-                                                                <Github className="w-3.5 h-3.5" /> {sub.github_username}
-                                                            </a>
-                                                        )}
-                                                        {sub.linkedin_url && (
-                                                            <a href={sub.linkedin_url} target="_blank" rel="noopener noreferrer"
-                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
-                                                                <Linkedin className="w-3.5 h-3.5" /> LinkedIn
-                                                            </a>
-                                                        )}
-                                                        {sub.resume_url && (
-                                                            <a href={sub.resume_url} target="_blank" rel="noopener noreferrer"
-                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 transition-colors">
-                                                                <FileText className="w-3.5 h-3.5" /> Resume
-                                                            </a>
-                                                        )}
-                                                    </div>
+                                                            {/* Link buttons */}
+                                                            <div className="flex flex-wrap gap-2 mb-2">
+                                                                {sub.github_username && (
+                                                                    <a href={`https://github.com/${sub.github_username}`} target="_blank" rel="noopener noreferrer"
+                                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-700 transition-colors">
+                                                                        <Github className="w-3.5 h-3.5" /> {sub.github_username}
+                                                                    </a>
+                                                                )}
+                                                                {sub.linkedin_url && (
+                                                                    <a href={sub.linkedin_url} target="_blank" rel="noopener noreferrer"
+                                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
+                                                                        <Linkedin className="w-3.5 h-3.5" /> LinkedIn
+                                                                    </a>
+                                                                )}
+                                                                {sub.resume_url && (
+                                                                    <a href={sub.resume_url} target="_blank" rel="noopener noreferrer"
+                                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+                                                                        <FileText className="w-3.5 h-3.5" /> Resume
+                                                                    </a>
+                                                                )}
+                                                            </div>
 
-                                                    {/* Details row */}
-                                                    <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
-                                                        {sub.repo_url && (
-                                                            <a href={sub.repo_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-600 hover:underline">
-                                                                <Code className="w-3 h-3" /> {sub.repo_url.replace('https://github.com/', '')}
-                                                            </a>
-                                                        )}
-                                                        {sub.leetcode_username && (
-                                                            <span className="flex items-center gap-1">
-                                                                <Code className="w-3 h-3 text-amber-500" /> LeetCode: <strong>{sub.leetcode_username}</strong>
-                                                            </span>
-                                                        )}
-                                                    </div>
+                                                            {/* Details row */}
+                                                            <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
+                                                                {sub.repo_url && (
+                                                                    <a href={sub.repo_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-600 hover:underline">
+                                                                        <Code className="w-3 h-3" /> {sub.repo_url.replace('https://github.com/', '')}
+                                                                    </a>
+                                                                )}
+                                                                {sub.leetcode_username && (
+                                                                    <span className="flex items-center gap-1">
+                                                                        <Code className="w-3 h-3 text-amber-500" /> LeetCode: <strong>{sub.leetcode_username}</strong>
+                                                                    </span>
+                                                                )}
+                                                            </div>
 
-                                                    {/* Context */}
-                                                    {sub.context && (
-                                                        <div className="mt-2 text-xs text-gray-600 bg-gray-50 p-3 rounded-md border border-gray-100">
-                                                            <span className="font-semibold text-gray-700">Notes:</span> {sub.context}
-                                                        </div>
+                                                            {/* Context */}
+                                                            {sub.context && (
+                                                                <div className="mt-2 text-xs text-gray-600 bg-gray-50 p-3 rounded-md border border-gray-100">
+                                                                    <span className="font-semibold text-gray-700">Notes:</span> {sub.context}
+                                                                </div>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </div>
                                             ))}
