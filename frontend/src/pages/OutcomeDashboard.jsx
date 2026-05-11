@@ -66,7 +66,7 @@ export default function OutcomeDashboard() {
     if (!outcome) return <div className="p-8 text-center text-gray-500">Outcome not found.</div>;
 
     return (
-        <div className="max-w-5xl mx-auto space-y-8">
+        <div className="max-w-6xl mx-auto space-y-8 px-4 sm:px-6 lg:px-8">
             <button onClick={() => navigate('/')} className="text-gray-500 hover:text-primary flex items-center gap-1 transition-colors">
                 <ArrowLeft className="w-4 h-4" /> Back to Outcomes
             </button>
@@ -167,15 +167,17 @@ export default function OutcomeDashboard() {
                 <div className="space-y-8">
 
                     {/* Signals Card */}
-                    <div className="card">
+                    <div className="card overflow-hidden">
                         <div className="card-header">
                             <h3 className="heading-2 text-base">Evaluation Signals</h3>
                         </div>
-                        <div className="space-y-3">
+                        <div className="space-y-3 min-w-0">
                             {outcome.tasks?.map((task) => (
-                                <div key={task.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
-                                    <span className="text-sm font-medium text-gray-700">{task.name}</span>
-                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${task.priority === 'High' ? 'bg-red-100 text-red-700' :
+                                <div key={task.id} className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 p-4 bg-gray-50 rounded-lg border border-gray-100 min-w-0">
+                                    <p className="text-sm font-medium leading-6 text-gray-700 min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
+                                        {task.name}
+                                    </p>
+                                    <span className={`self-start shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full ${task.priority === 'High' ? 'bg-red-100 text-red-700' :
                                         task.priority === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
                                             'bg-green-100 text-green-700'
                                         }`}>
