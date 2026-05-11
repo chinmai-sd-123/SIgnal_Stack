@@ -3,7 +3,8 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
     Briefcase, MapPin, Building, IndianRupee, Clock,
     CheckCircle, Plus, ArrowLeft, ChevronRight, Trash2,
-    Send, Copy, ExternalLink, UserPlus, X, RefreshCw
+    Send, Copy, ExternalLink, UserPlus, X, RefreshCw,
+    Github, Linkedin, FileText, Code
 } from 'lucide-react';
 import { getJob, getJobOutcomes, deleteJob, finalizeShortlist, archiveJob, createInvite, getJobInvites, deleteInvite } from '../api';
 
@@ -333,7 +334,55 @@ export default function JobDetail() {
                                             </button>
                                         </div>
                                     </div>
-                                    {inv.github_username && (
+                                    {inv.status === 'submitted' && (
+                                        <div className="mt-3 p-4 bg-gray-50 rounded-lg border border-gray-100 space-y-3">
+                                            {/* Candidate links row */}
+                                            <div className="flex flex-wrap gap-3">
+                                                {inv.github_username && (
+                                                    <a href={`https://github.com/${inv.github_username}`} target="_blank" rel="noopener noreferrer"
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-700 transition-colors">
+                                                        <Github className="w-3.5 h-3.5" /> {inv.github_username}
+                                                    </a>
+                                                )}
+                                                {inv.linkedin_url && (
+                                                    <a href={inv.linkedin_url} target="_blank" rel="noopener noreferrer"
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
+                                                        <Linkedin className="w-3.5 h-3.5" /> LinkedIn Profile
+                                                    </a>
+                                                )}
+                                                {inv.resume_url && (
+                                                    <a href={inv.resume_url} target="_blank" rel="noopener noreferrer"
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+                                                        <FileText className="w-3.5 h-3.5" /> Resume
+                                                    </a>
+                                                )}
+                                            </div>
+                                            {/* Repo & LeetCode */}
+                                            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-600">
+                                                {inv.repo_url && (
+                                                    <a href={inv.repo_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-600 hover:underline">
+                                                        <Code className="w-3 h-3" /> {inv.repo_url.replace('https://github.com/', '')}
+                                                    </a>
+                                                )}
+                                                {inv.leetcode_username && (
+                                                    <span className="flex items-center gap-1">
+                                                        <Code className="w-3 h-3 text-amber-500" /> LeetCode: <strong>{inv.leetcode_username}</strong>
+                                                    </span>
+                                                )}
+                                                {inv.submitted_at && (
+                                                    <span className="text-gray-400">Submitted {new Date(inv.submitted_at).toLocaleDateString()}</span>
+                                                )}
+                                            </div>
+                                            {/* Context notes */}
+                                            {inv.context && (
+                                                <div className="text-xs text-gray-600 bg-white p-3 rounded-md border border-gray-100">
+                                                    <span className="font-semibold text-gray-700">Notes:</span> {inv.context}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                    {/* Minimal info for non-submitted */}
+                                    {inv.status !== 'submitted' && inv.github_username && (
                                         <div className="mt-2 text-xs text-gray-500 flex gap-4">
                                             <span>GitHub: <strong>{inv.github_username}</strong></span>
                                             {inv.resume_url && <a href={inv.resume_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">Resume</a>}
