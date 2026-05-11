@@ -125,7 +125,7 @@ Traditional hiring pipelines are fundamentally broken:
  │                           │◄───────►│                           │
  │  • React 18 + Vite        │  REST   │  • FastAPI + Uvicorn      │
  │  • TailwindCSS            │   API   │  • SQLAlchemy ORM         │
- │  • React Router v6        │         │  • SQLite Database        │
+ │  • React Router v6        │         │  • PostgreSQL Database    │
  │  • Recharts               │         │  • OpenAI Integration     │
  │  • Lucide Icons           │         │  • GitHub API Client      │
  └───────────────────────────┘         │  • Worker Queue           │
@@ -139,7 +139,7 @@ Traditional hiring pipelines are fundamentally broken:
 |-------|------------|
 | **Frontend** | React 18, Vite 5, TailwindCSS 3, React Router 6, Recharts, Lucide React |
 | **Backend** | Python 3.11+, FastAPI 0.128, Uvicorn, SQLAlchemy 2.0 |
-| **Database** | SQLite (file-based, zero-config) |
+| **Database** | PostgreSQL (Neon serverless DB via psycopg2) |
 | **AI/LLM** | OpenAI API (gpt-4o-mini) |
 | **External APIs** | GitHub REST API |
 | **Caching** | Redis (optional — in-memory fallback) |
@@ -213,8 +213,8 @@ signalstack.db
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/finalroundai/zenith_signalstack.git
-cd zenith_signalstack
+git clone https://github.com/chinmai-sd-123/SIgnal_Stack.git
+cd SIgnal_Stack
 ```
 
 ### 2. Configure Environment Variables
@@ -234,7 +234,7 @@ OPENAI_API_KEY=sk-your_openai_api_key_here
 
 # ─── OPTIONAL ───────────────────────────────────────
 OPENAI_MODEL=gpt-4o-mini                   # Default model
-DATABASE_URL=sqlite:///./signalstack.db     # Default: SQLite
+DATABASE_URL=postgresql://user:password@host/dbname # Default: PostgreSQL
 REDIS_URL=redis://localhost:6379/0          # Falls back to in-memory
 JWT_SECRET=change-this-in-production
 WORKER_THREADS=3
