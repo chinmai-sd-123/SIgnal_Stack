@@ -372,7 +372,8 @@ export async function getJobInvites(jobId) {
 export async function getInviteByToken(token) {
     const response = await fetch(`${API_URL}/invites/${token}`);
     if (response.status === 410) throw new Error("EXPIRED");
-    if (response.status === 400) throw new Error("ALREADY_USED");
+    if (response.status === 400) throw new Error("CLOSED");
+    if (response.status >= 500) throw new Error("SERVER_ERROR");
     if (!response.ok) {
         const error = await response.json().catch(() => ({}));
         throw new Error(error.detail || "Invite not found");

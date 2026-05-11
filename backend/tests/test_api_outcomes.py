@@ -141,3 +141,48 @@ def test_invited_candidate_is_backfilled_to_outcome_created_after_submission(cli
     assert proofs[0]["payload"]["repo_url"] == "https://github.com/candidate-one/health-monitor"
     assert proofs[0]["payload"]["resume_url"] == "https://drive.google.com/resume"
     assert proofs[0]["payload"]["artifact_link"] == ""
+
+
+@pytest.mark.integration
+def test_candidate_invite_page_loads_job_outcomes(client):
+    job_resp = client.post("/jobs", json={
+        "title": "AI Software Engineer Intern",
+        "description": "Build AI developer tools",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Software Engineering",
+        "job_type": "Internship",
+    })
+    assert job_resp.status_code == 200
+    job_id = job_resp.json()["id"]
+
+    outcome_resp = client.post("/outcomes", json={
+        "job_id": job_id,
+        "title": "Build AI Code Review Workflow",
+        "description": "Submit code to an LLM and return structured review feedback",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Software Engineering",
+        "job_type": "Internship",
+        "tasks": [
+            {"name": "Implement review API integration", "priority": "High", "weight": 1.0},
+        ],
+    })
+    assert outcome_resp.status_code == 200
+
+    invite_resp = client.post(f"/jobs/{job_id}/invites")
+    assert invite_resp.status_code == 200
+    token = invite_resp.json()["token"]
+
+    get_resp = client.get(f"/invites/{token}")
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert data["token"] == token
+    assert data["job"]["id"] == job_id
+    assert data["job"]["outcomes"] == [
+        {
+            "id": outcome_resp.json()["id"],
+            "title": "Build AI Code Review Workflow",
+            "description": "Submit code to an LLM and return structured review feedback",
+        }
+    ]

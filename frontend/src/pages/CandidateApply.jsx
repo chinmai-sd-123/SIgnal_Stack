@@ -34,7 +34,8 @@ export default function CandidateApply() {
                 setInvite(data);
             } catch (err) {
                 if (err.message === 'EXPIRED') setError('expired');
-                else if (err.message === 'ALREADY_USED') setError('used');
+                else if (err.message === 'CLOSED') setError('closed');
+                else if (err.message === 'SERVER_ERROR') setError('server_error');
                 else setError('not_found');
             } finally { setLoading(false); }
         }
@@ -109,6 +110,7 @@ export default function CandidateApply() {
             expired: { icon: <Clock className="w-14 h-14 text-[#c9a227]" />, title: 'Invite Expired', msg: 'This invite link has expired. Please contact the recruiter for a new link.', accent: '#c9a227' },
             closed: { icon: <AlertTriangle className="w-14 h-14 text-[#c9a227]" />, title: 'Applications Closed', msg: 'This invite link is no longer accepting applications.', accent: '#c9a227' },
             duplicate: { icon: <CheckCircle className="w-14 h-14 text-[#0b5f66]" />, title: 'Already Applied', msg: 'You have already submitted an application with this email address.', accent: '#0b5f66' },
+            server_error: { icon: <AlertTriangle className="w-14 h-14 text-red-400" />, title: 'Application Link Temporarily Unavailable', msg: 'We could not load this invite because the server returned an error. Please try again shortly or contact the recruiter.', accent: '#EF4444' },
             not_found: { icon: <AlertTriangle className="w-14 h-14 text-red-400" />, title: 'Invite Not Found', msg: 'This invite link is invalid. Please check the URL or contact the recruiter.', accent: '#EF4444' },
         }[error] || { icon: <AlertTriangle className="w-14 h-14 text-red-400" />, title: 'Error', msg: 'Something went wrong.', accent: '#EF4444' };
 
