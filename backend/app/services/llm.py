@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class OpenAILLMService:
     def __init__(self):
         self.api_key = config.OPENAI_API_KEY
-        self.model = config.OPENAI_MODEL or "gpt-4o-mini"
+        self.model = config.OPENAI_MODEL or "gpt-5.4-mini"
         self.leetcode_service = LeetCodeService()
         self.client = None
 
