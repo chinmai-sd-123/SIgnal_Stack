@@ -281,7 +281,7 @@ export const getRepoPreview = async (repoUrl) => {
 };
 
 export const getLeetCodeStats = async (username) => {
-    const response = await fetch(`${API_URL}/plugin/leetcode/${username}`);
+    const response = await fetch(`${API_URL}/plugin/leetcode/${encodeURIComponent(username.trim())}`);
     if (!response.ok) throw new Error('Failed to fetch leetcode stats');
     return response.json();
 };

@@ -26,6 +26,7 @@ export default function CandidateApply() {
     const [showRepoList, setShowRepoList] = useState(false);
     const [preview, setPreview] = useState(null);
     const [leetcodeStats, setLeetcodeStats] = useState(null);
+    const [leetcodeError, setLeetcodeError] = useState(null);
 
     useEffect(() => {
         async function loadInvite() {
@@ -75,8 +76,15 @@ export default function CandidateApply() {
                 try {
                     const stats = await getLeetCodeStats(formData.leetcode_username);
                     setLeetcodeStats(!stats.error ? stats : null);
-                } catch { setLeetcodeStats(null); }
-            } else { setLeetcodeStats(null); }
+                    setLeetcodeError(stats.error || null);
+                } catch {
+                    setLeetcodeStats(null);
+                    setLeetcodeError('Could not verify LeetCode profile right now.');
+                }
+            } else {
+                setLeetcodeStats(null);
+                setLeetcodeError(null);
+            }
         }, 1000);
         return () => clearTimeout(timeout);
     }, [formData.repo_url, formData.leetcode_username, isTechnical]);
@@ -329,6 +337,9 @@ export default function CandidateApply() {
                                 </label>
                                 <input type="text" placeholder="leetcode_user" value={formData.leetcode_username}
                                     onChange={(e) => setFormData({ ...formData, leetcode_username: e.target.value })} className={inputClass} />
+                                {leetcodeError && (
+                                    <p className="mt-1.5 text-xs text-red-500">{leetcodeError}</p>
+                                )}
                             </div>
                             {leetcodeStats && (
                                 <div className="mt-2 rounded-xl p-3 border border-[rgba(11,95,102,0.2)] flex items-center gap-4" style={{ background: 'rgba(11,95,102,0.06)' }}>
@@ -345,7 +356,7 @@ export default function CandidateApply() {
                                     </div>
                                     <div className="ml-auto text-right">
                                         <div className="text-xs font-bold text-[#475569] uppercase tracking-wider">Acceptance</div>
-                                        <div className="text-sm font-mono text-[#0f172a]">{leetcodeStats.acceptance_rate}%</div>
+                                        <div className="text-sm font-mono text-[#0f172a]">{leetcodeStats.acceptance_rate ?? 'N/A'}{leetcodeStats.acceptance_rate != null ? '%' : ''}</div>
                                     </div>
                                 </div>
                             )}

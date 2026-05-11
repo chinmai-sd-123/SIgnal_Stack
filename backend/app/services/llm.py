@@ -269,19 +269,20 @@ class OpenAILLMService:
                 if not any(e.get("type") == "leetcode_stats" for e in evidence):
                     username = payload["leetcode_username"]
                     stats = self.leetcode_service.fetch_stats(username)
-                    evidence = list(evidence) + [{
-                        "type": "leetcode_stats",
-                        "ref": "LEETCODE",
-                        "snippet": (
-                            f"LeetCode Profile: {username}\n"
-                            f"Total Solved: {stats.get('total_solved')} "
-                            f"(Easy: {stats.get('easy_solved')}, "
-                            f"Med: {stats.get('medium_solved')}, "
-                            f"Hard: {stats.get('hard_solved')})\n"
-                            f"Acceptance Rate: {stats.get('acceptance_rate')}%\n"
-                            f"Ranking: {stats.get('ranking')}"
-                        )
-                    }]
+                    if not stats.get("error"):
+                        evidence = list(evidence) + [{
+                            "type": "leetcode_stats",
+                            "ref": "LEETCODE",
+                            "snippet": (
+                                f"LeetCode Profile: {stats.get('username') or username}\n"
+                                f"Total Solved: {stats.get('total_solved')} "
+                                f"(Easy: {stats.get('easy_solved')}, "
+                                f"Med: {stats.get('medium_solved')}, "
+                                f"Hard: {stats.get('hard_solved')})\n"
+                                f"Acceptance Rate: {stats.get('acceptance_rate')}%\n"
+                                f"Ranking: {stats.get('ranking')}"
+                            )
+                        }]
 
             has_code = bool(self._source_code_evidence(evidence))
             has_artifact = any(e.get("type") == "work_artifact" for e in evidence)
@@ -485,58 +486,91 @@ Return JSON only:
     # ── FIXED: generate_tasks ───────────────────────────────────────────────
     def generate_tasks(self, description: str) -> List[Dict[str, Any]]:
 
+        def normalize_task_name(name: str) -> str:
+            text = " ".join((name or "").replace("\n", " ").split())
+            text = text.strip(" -:;.")
+            if len(text) > 140:
+                text = text[:137].rsplit(" ", 1)[0].strip(" -:;.") + "..."
+            return text
+
+        def normalize_priority(priority: str, index: int) -> str:
+            value = (priority or "").strip().title()
+            if value not in {"High", "Medium", "Low"}:
+                return "High" if index < 2 else "Medium"
+            return value
+
+        def clean_tasks(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            seen, final = set(), []
+            for task in tasks:
+                name = normalize_task_name(task.get("name", ""))
+                if len(name) < 12:
+                    continue
+                key = name.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                final.append({
+                    "name": name,
+                    "priority": normalize_priority(task.get("priority", "Medium"), len(final)),
+                })
+                if len(final) >= 5:
+                    break
+
+            if final and all(task["priority"] == "High" for task in final):
+                for task in final[2:]:
+                    task["priority"] = "Medium"
+
+            return final
+
         def get_fallback_tasks(desc: str):
             desc_lower = desc.lower()
             possible_tasks = []
 
             if any(k in desc_lower for k in ["api", "backend", "fastapi", "flask", "django", "node", "express"]):
-                possible_tasks.append({"name": "Design RESTful API Specification", "priority": "High"})
-                possible_tasks.append({"name": "Implement Core Business Logic", "priority": "High"})
+                possible_tasks.append({"name": "Expose working API endpoints for the core user workflow", "priority": "High"})
+                possible_tasks.append({"name": "Implement request validation and clear error responses", "priority": "Medium"})
             if any(k in desc_lower for k in ["data", "sql", "schema", "db", "postgres", "mongo"]):
-                possible_tasks.append({"name": "Design Database Schema & Migrations", "priority": "High"})
+                possible_tasks.append({"name": "Persist domain data with a clear schema or model layer", "priority": "High"})
             if any(k in desc_lower for k in ["ui", "frontend", "react", "vue", "angular", "css", "web"]):
-                possible_tasks.append({"name": "Build Reusable Component Library", "priority": "Medium"})
-                possible_tasks.append({"name": "Implement Responsive Layouts", "priority": "Medium"})
+                possible_tasks.append({"name": "Build the primary user interface for the outcome workflow", "priority": "High"})
+                possible_tasks.append({"name": "Handle loading, empty, success, and error states in the UI", "priority": "Medium"})
             if any(k in desc_lower for k in ["auth", "login", "security", "jwt", "oauth"]):
-                possible_tasks.append({"name": "Implement Secure Authentication", "priority": "High"})
+                possible_tasks.append({"name": "Implement authentication and authorization checks around protected actions", "priority": "High"})
             if any(k in desc_lower for k in ["ml", "ai", "scikit", "nlp", "classification", "model", "train"]):
-                possible_tasks.append({"name": "Train & Evaluate ML Model", "priority": "High"})
-                possible_tasks.append({"name": "Implement Inference Pipeline", "priority": "High"})
-            if any(k in desc_lower for k in ["ci", "cd", "docker", "cloud", "deploy", "aws", "render"]):
-                possible_tasks.append({"name": "Containerize Application", "priority": "Medium"})
-                possible_tasks.append({"name": "Setup CI/CD Pipeline", "priority": "Medium"})
+                possible_tasks.append({"name": "Prepare data and features used by the model or AI workflow", "priority": "High"})
+                possible_tasks.append({"name": "Implement model inference or LLM call flow with usable outputs", "priority": "High"})
+                possible_tasks.append({"name": "Report evaluation metrics or qualitative validation for the AI output", "priority": "Medium"})
+            if any(k in desc_lower for k in ["ci", "cd", "docker", "cloud", "deploy", "aws", "render", "vercel"]):
+                possible_tasks.append({"name": "Provide runnable setup instructions or deployment configuration", "priority": "Low"})
             if len(possible_tasks) < 3:
                 possible_tasks.extend([
-                    {"name": "System Architecture Design", "priority": "High"},
-                    {"name": "Write Comprehensive Unit Tests", "priority": "Medium"},
-                    {"name": "Update Documentation", "priority": "Low"},
+                    {"name": "Implement the main end-to-end workflow described by the outcome", "priority": "High"},
+                    {"name": "Organize code into readable modules with clear responsibilities", "priority": "Medium"},
+                    {"name": "Document how to run and verify the project locally", "priority": "Low"},
                 ])
 
-            seen, final = set(), []
-            for task in possible_tasks:
-                if task["name"] not in seen:
-                    final.append(task)
-                    seen.add(task["name"])
-                if len(final) >= 5:
-                    break
-            return final
+            return clean_tasks(possible_tasks)
 
         if not self.api_key or not self.client:
             return get_fallback_tasks(description)
 
         try:
-            prompt = f"""You are a Principal Engineer decomposing a specific project into evaluable technical tasks.
+            prompt = f"""You are a senior engineering evaluator creating evaluation signals for early-career candidate repositories.
 
-Project Description:
+Context:
 \"\"\"{description}\"\"\"
 
 Rules:
-- Each task must be directly derivable from the project description above. Do not add generic tasks unrelated to it.
-- Task names must be specific enough that a code reviewer could look at a GitHub repo and verify completion.
-- Bad example: "Implement Core Business Logic" (too vague)
-- Good example: "Implement JWT authentication with refresh token rotation" (verifiable)
-- Return 3-5 tasks with a realistic mix of High / Medium / Low priority.
-- Do not mark all tasks High priority.
+- Create 4-5 evaluation signals, not a full implementation spec.
+- Each signal must be directly derivable from the context. Do not add unrelated technologies.
+- Each signal must be verifiable from a GitHub repo, code files, notebook, README, or artifact.
+- Keep each signal short: 8-18 words, maximum 140 characters.
+- Prefer evidence of working product logic over CI/CD, Docker, perfect tests, or deployment.
+- Include tests, CI, Docker, or deployment only when the context explicitly requires them.
+- Good signal: "Sends submitted code/context to an LLM review service"
+- Bad signal: "Implement a complete production-grade scalable cloud platform with tests and CI"
+- Return a realistic priority mix: 1-2 High, 2-3 Medium, optional 1 Low.
+- Do not mark every signal High.
 
 Return JSON only, no explanation.
 """
@@ -563,7 +597,8 @@ Return JSON only, no explanation.
                 },
             }
             data = self._parse_json(self._call_with_retry(prompt, schema))
-            return data["tasks"]
+            tasks = clean_tasks(data.get("tasks", []))
+            return tasks if len(tasks) >= 3 else get_fallback_tasks(description)
         except Exception as e:
             logger.warning("[LLM] Task generation error: %s", e)
             return get_fallback_tasks(description)

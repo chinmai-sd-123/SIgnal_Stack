@@ -1,52 +1,116 @@
+from typing import Any, Dict, Optional
+from urllib.parse import urlparse
+
 import requests
-from typing import Dict, Any, Optional
+
 
 class LeetCodeService:
-    BASE_URL = "https://leetcode-stats-api.herokuapp.com"
+    GRAPHQL_URL = "https://leetcode.com/graphql"
+
+    def _normalize_username(self, username: str) -> str:
+        value = (username or "").strip().strip("@")
+        if not value:
+            return ""
+
+        if "leetcode.com" in value:
+            parsed = urlparse(value if value.startswith(("http://", "https://")) else f"https://{value}")
+            parts = [part for part in parsed.path.split("/") if part]
+            if parts and parts[0] in {"u", "profile"} and len(parts) > 1:
+                return parts[1]
+            if parts:
+                return parts[-1]
+
+        return value.rstrip("/")
+
+    def _count_for_difficulty(self, rows: list, difficulty: str) -> Dict[str, int]:
+        row = next((item for item in rows if item.get("difficulty") == difficulty), {})
+        return {
+            "count": int(row.get("count") or 0),
+            "submissions": int(row.get("submissions") or 0),
+        }
+
+    def _extract_submission_rows(self, matched_user: Dict[str, Any]) -> list:
+        stats = matched_user.get("submitStatsGlobal") or matched_user.get("submitStats") or {}
+        return stats.get("acSubmissionNum") or []
 
     def fetch_stats(self, username: str) -> Dict[str, Any]:
         """
-        Fetches LeetCode stats for a given username.
-        Uses a public wrapper API. Falls back to mock data if API fails.
+        Fetch real LeetCode stats for a username.
+
+        Important: this never returns mock numbers. If LeetCode is unavailable
+        or the user is not found, callers get an explicit error and should not
+        display the stats as verified candidate data.
         """
-        if not username:
-            return {"error": "No username provided"}
+        normalized = self._normalize_username(username)
+        if not normalized:
+            return {"username": "", "error": "No username provided"}
+
+        query = """
+        query userProfile($username: String!) {
+          matchedUser(username: $username) {
+            username
+            submitStatsGlobal {
+              acSubmissionNum {
+                difficulty
+                count
+                submissions
+              }
+            }
+            submitStats {
+              acSubmissionNum {
+                difficulty
+                count
+                submissions
+              }
+            }
+            profile {
+              ranking
+            }
+          }
+        }
+        """
 
         try:
-            # Try fetching from real API
-            response = requests.get(f"{self.BASE_URL}/{username}", timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("status") == "error":
-                     return self._get_mock_stats(username, error="User not found")
-                return {
-                    "username": username,
-                    "total_solved": data.get("totalSolved", 0),
-                    "easy_solved": data.get("easySolved", 0),
-                    "medium_solved": data.get("mediumSolved", 0),
-                    "hard_solved": data.get("hardSolved", 0),
-                    "ranking": data.get("ranking", "N/A"),
-                    "acceptance_rate": data.get("acceptanceRate", 0),
-                }
-        except Exception as e:
-            print(f"LeetCode API Error: {e}. Using mock data.")
-        
-        # Fallback to mock data for demo stability
-        return self._get_mock_stats(username)
+            response = requests.post(
+                self.GRAPHQL_URL,
+                json={"query": query, "variables": {"username": normalized}},
+                headers={
+                    "Content-Type": "application/json",
+                    "Referer": f"https://leetcode.com/u/{normalized}/",
+                    "User-Agent": "SignalStack/1.0",
+                },
+                timeout=8,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            return {
+                "username": normalized,
+                "error": "LeetCode stats unavailable",
+                "unavailable": True,
+            }
 
-    def _get_mock_stats(self, username: str, error: Optional[str] = None) -> Dict[str, Any]:
-        if error:
-            return {"username": username, "error": error}
-            
-        # Deterministic mock stats based on username length to simulate variety
-        seed = len(username)
+        matched_user: Optional[Dict[str, Any]] = payload.get("data", {}).get("matchedUser")
+        if not matched_user:
+            return {"username": normalized, "error": "LeetCode user not found"}
+
+        rows = self._extract_submission_rows(matched_user)
+        total = self._count_for_difficulty(rows, "All")
+        easy = self._count_for_difficulty(rows, "Easy")
+        medium = self._count_for_difficulty(rows, "Medium")
+        hard = self._count_for_difficulty(rows, "Hard")
+        acceptance_rate = None
+        if total["submissions"] > 0:
+            acceptance_rate = round((total["count"] / total["submissions"]) * 100, 1)
+
         return {
-            "username": username,
-            "total_solved": 150 + (seed * 10),
-            "easy_solved": 50 + (seed * 5),
-            "medium_solved": 80 + (seed * 3),
-            "hard_solved": 20 + (seed * 2),
-            "ranking": 100000 - (seed * 1000),
-            "acceptance_rate": 65.5,
-            "is_mock": True
+            "username": matched_user.get("username") or normalized,
+            "total_solved": total["count"],
+            "easy_solved": easy["count"],
+            "medium_solved": medium["count"],
+            "hard_solved": hard["count"],
+            "ranking": matched_user.get("profile", {}).get("ranking") or "N/A",
+            "acceptance_rate": acceptance_rate,
+            "is_mock": False,
+            "source": "leetcode_graphql",
         }

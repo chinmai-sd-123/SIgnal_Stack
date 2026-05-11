@@ -61,6 +61,7 @@ export default function ProofSubmit() {
     // Mock Live Preview State
     const [preview, setPreview] = useState(null);
     const [leetcodeStats, setLeetCodeStats] = useState(null);
+    const [leetcodeError, setLeetCodeError] = useState(null);
 
     useEffect(() => {
         async function loadOutcome() {
@@ -99,15 +100,19 @@ export default function ProofSubmit() {
                     const stats = await getLeetCodeStats(formData.leetcode_username);
                     if (!stats.error) {
                         setLeetCodeStats(stats);
+                        setLeetCodeError(null);
                     } else {
                         setLeetCodeStats(null);
+                        setLeetCodeError(stats.error);
                     }
                 } catch (error) {
                     console.error("Failed to fetch leetcode stats", error);
                     setLeetCodeStats(null);
+                    setLeetCodeError('Could not verify LeetCode profile right now.');
                 }
             } else {
                 setLeetCodeStats(null);
+                setLeetCodeError(null);
             }
         };
 
@@ -324,6 +329,9 @@ export default function ProofSubmit() {
                                             className="input-field pl-10"
                                         />
                                     </div>
+                                    {leetcodeError && (
+                                        <p className="mt-1.5 text-xs text-red-500">{leetcodeError}</p>
+                                    )}
                                 </div>
                                 {leetcodeStats && (
                                     <div className="mt-2 bg-primary-soft rounded-lg p-3 border border-indigo-200 flex items-center gap-4 animate-fade-in">
@@ -342,7 +350,7 @@ export default function ProofSubmit() {
                                         </div>
                                         <div className="ml-auto text-right">
                                             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Acceptance</div>
-                                            <div className="text-sm font-mono text-gray-900">{leetcodeStats.acceptance_rate}%</div>
+                                            <div className="text-sm font-mono text-gray-900">{leetcodeStats.acceptance_rate ?? 'N/A'}{leetcodeStats.acceptance_rate != null ? '%' : ''}</div>
                                         </div>
                                     </div>
                                 )}

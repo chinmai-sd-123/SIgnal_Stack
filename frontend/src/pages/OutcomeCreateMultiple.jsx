@@ -102,24 +102,34 @@ export default function OutcomeCreateMultiple() {
     setOutcomes(newOutcomes);
   };
 
+  const normalizeGeneratedSignals = (suggestions, outcomeIndex) => (
+    suggestions
+      .map((signal, i) => ({
+        ...signal,
+        id: `task-${outcomeIndex}-${i}`,
+        name: (signal.name || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+        priority: signal.priority || (i < 2 ? 'High' : 'Medium')
+      }))
+      .filter(signal => signal.name.length > 0)
+      .slice(0, 5)
+  );
+
   const handleGenerateTasks = async (outcomeIndex) => {
     const outcome = outcomes[outcomeIndex];
     if (!outcome.description) return;
 
     setGenerating(outcomeIndex);
     try {
-      const context = job
-        ? `Job Title: ${job.title}\nJob Description: ${job.description}\n\nOutcome Goal: ${outcome.description}`
-        : outcome.description;
+      const context = [
+        job ? `Job Title: ${job.title}` : null,
+        job ? `Job Description: ${job.description}` : null,
+        outcome.title ? `Outcome Title: ${outcome.title}` : null,
+        `Outcome Goal: ${outcome.description}`,
+        'Generate concise evaluation signals that can be verified from candidate repositories or artifacts.'
+      ].filter(Boolean).join('\n');
 
       const suggestions = await suggestTasks(context);
-      const formatted = suggestions.map((t, i) => ({
-        ...t,
-        id: `task-${outcomeIndex}-${i}`,
-        priority: t.priority || 'Medium'
-      }));
-
-      updateOutcome(outcomeIndex, 'tasks', formatted);
+      updateOutcome(outcomeIndex, 'tasks', normalizeGeneratedSignals(suggestions, outcomeIndex));
     } catch (error) {
       console.error('Failed to generate tasks', error);
       alert('Failed to generate tasks. Please try again.');
@@ -385,12 +395,12 @@ export default function OutcomeCreateMultiple() {
                     <span className="text-xs font-bold text-gray-400 font-mono">{(taskIndex + 1).toString().padStart(2, '0')}</span>
                     <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="md:col-span-2">
-                        <input
-                          type="text"
+                        <textarea
+                          rows={2}
                           value={task.name}
                           onChange={(e) => updateTask(outcomeIndex, taskIndex, 'name', e.target.value)}
-                          className="input-field border-gray-200 bg-white"
-                          placeholder="Signal name..."
+                          className="input-field border-gray-200 bg-white resize-none leading-5"
+                          placeholder="Evidence-checkable signal..."
                         />
                       </div>
                       <div>

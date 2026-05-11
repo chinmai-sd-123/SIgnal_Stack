@@ -104,20 +104,32 @@ export default function OutcomeCreate() {
     // Generated Tasks
     const [tasks, setTasks] = useState([]);
 
+    const normalizeGeneratedSignals = (suggestions) => (
+        suggestions
+            .map((signal, i) => ({
+                ...signal,
+                id: `temp-${i}`,
+                name: (signal.name || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+                priority: signal.priority || (i < 2 ? 'High' : 'Medium')
+            }))
+            .filter(signal => signal.name.length > 0)
+            .slice(0, 5)
+    );
+
     const handleGenerateTasks = async () => {
         if (!formData.description) return;
         setGenerating(true);
         try {
-            // Enhanced prompt context if job exists
-            const context = job ? `Job Title: ${job.title}\nJob Description: ${job.description}\n\nOutcome Goal: ${formData.description}` : formData.description;
+            const context = [
+                job ? `Job Title: ${job.title}` : null,
+                job ? `Job Description: ${job.description}` : null,
+                formData.title ? `Outcome Title: ${formData.title}` : null,
+                `Outcome Goal: ${formData.description}`,
+                'Generate concise evaluation signals that can be verified from candidate repositories or artifacts.'
+            ].filter(Boolean).join('\n');
 
             const suggestions = await suggestTasks(context);
-            const formatted = suggestions.map((t, i) => ({
-                ...t,
-                id: `temp-${i}`,
-                priority: t.priority || 'Medium'
-            }));
-            setTasks(formatted);
+            setTasks(normalizeGeneratedSignals(suggestions));
         } catch (error) {
             console.error("Failed to generate tasks", error);
             alert("Failed to generate tasks. Please try again.");
@@ -381,12 +393,12 @@ export default function OutcomeCreate() {
                                 <span className="text-xs font-bold text-gray-400 font-mono">{(index + 1).toString().padStart(2, '0')}</span>
                                 <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="md:col-span-2">
-                                        <input
-                                            type="text"
+                                        <textarea
+                                            rows={2}
                                             value={task.name}
                                             onChange={(e) => handleTaskChange(index, 'name', e.target.value)}
-                                            className="input-field border-gray-200 bg-white"
-                                            placeholder="Signal name..."
+                                            className="input-field border-gray-200 bg-white resize-none leading-5"
+                                            placeholder="Evidence-checkable signal..."
                                         />
                                     </div>
                                     <div>
