@@ -1,14 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel, field_validator
 from fastapi.encoders import jsonable_encoder
 
 from app.config.database import get_db
-from app.services import crud
 from app.services.repo_selector import RepoSelector, RepoScore
 
 router = APIRouter(prefix="/plugin/github", tags=["GitHub Repo Selector"])
+logger = logging.getLogger(__name__)
 
 class RepoSelectionRequest(BaseModel):
     github_username: str
@@ -52,9 +53,11 @@ def select_repos(request: RepoSelectionRequest, db: Session = Depends(get_db)):
     """
     selector = RepoSelector()
 
-    print(
-        f"[repo-select] username={request.github_username} job_id={request.job_id} candidate_id={request.candidate_id}",
-        flush=True,
+    logger.info(
+        "[repo-select] username=%s job_id=%s candidate_id=%s",
+        request.github_username,
+        request.job_id,
+        request.candidate_id,
     )
     
     # Construct candidate dict
@@ -66,14 +69,6 @@ def select_repos(request: RepoSelectionRequest, db: Session = Depends(get_db)):
     # Construct job dict if job_id provided
     job_dict = None
     if request.job_id:
-        job = crud.get_outcome(db, request.job_id) # Outcome/Job are mixed, checking crud
-        # Actually crud.get_outcome returns Outcome model. 
-        # But we also have get_job now? 
-        # Let's check crud.py to be sure what we should call.
-        # Ideally we want Job (requirements, title).
-        # Since I just refactored Job hierarchy, I should use Job model if possible.
-        # But crud.get_outcome might be what's available? 
-        # Let's check crud.py content or assumes I can query Job directly.
         from app.models.job import Job
         job_obj = db.query(Job).filter(Job.id == request.job_id).first()
             
@@ -96,14 +91,14 @@ def select_repos(request: RepoSelectionRequest, db: Session = Depends(get_db)):
             }
             
     scored_repos = selector.select_repos_for_candidate(candidate, job_dict)
-    print(f"[repo-select] found={len(scored_repos)}", flush=True)
+    logger.info("[repo-select] found=%s", len(scored_repos))
 
     if scored_repos:
         return jsonable_encoder(scored_repos)
 
     # Fallback: return basic repo list if scoring yields nothing
     user_repos = selector._get_user_repos(request.github_username)
-    print(f"[repo-select] fallback_user_repos={len(user_repos)}", flush=True)
+    logger.info("[repo-select] fallback_user_repos=%s", len(user_repos))
     fallback: List[RepoScore] = []
     for repo in user_repos[:5]:
         fallback.append(RepoScore(

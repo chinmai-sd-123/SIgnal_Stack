@@ -13,7 +13,7 @@ import logging
 import re
 import time
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 from dataclasses import dataclass
 
 import requests
@@ -204,11 +204,109 @@ def detect_language_from_file(filename: str) -> str:
 # Deprioritize fork indicators
 FORK_INDICATORS = ["forked from", "fork", "tutorial", "example", "demo", "learn", "course"]
 
+STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "build", "built", "by", "for",
+    "from", "in", "into", "is", "of", "on", "or", "role", "that", "the", "this",
+    "to", "using", "with", "work", "will", "you", "your",
+    "candidate", "developer", "engineer", "intern", "senior", "junior",
+}
+
+TOKEN_ALIASES = {
+    "authentication": "auth",
+    "authenticate": "auth",
+    "authorization": "auth",
+    "authorize": "auth",
+    "authorisation": "auth",
+    "authn": "auth",
+    "authz": "auth",
+    "oauth": "auth",
+    "jwt": "auth",
+    "postgresql": "postgres",
+    "postgres": "postgres",
+    "database": "db",
+    "databases": "db",
+    "frontend": "front",
+    "backend": "back",
+}
+
+LANGUAGE_ALIASES = {
+    "js": "javascript",
+    "node": "javascript",
+    "nodejs": "javascript",
+    "node.js": "javascript",
+    "react": "javascript",
+    "reactjs": "javascript",
+    "react.js": "javascript",
+    "next": "javascript",
+    "nextjs": "javascript",
+    "next.js": "javascript",
+    "ts": "typescript",
+    "py": "python",
+    "django": "python",
+    "flask": "python",
+    "fastapi": "python",
+    "jupyter": "python",
+    "jupyter notebook": "python",
+    "golang": "go",
+    "c sharp": "csharp",
+    "c#": "csharp",
+    "c-sharp": "csharp",
+    "csharp": "csharp",
+    ".net": "csharp",
+    "dotnet": "csharp",
+}
+
+MANIFEST_LANGUAGE_PRIORITY = {
+    "typescript": 90,
+    "javascript": 80,
+    "python": 75,
+    "go": 70,
+    "rust": 70,
+    "java": 65,
+    "kotlin": 65,
+    "csharp": 65,
+}
+
+
+def _canonical_language(language: Optional[str]) -> Optional[str]:
+    if not language:
+        return None
+    normalized = re.sub(r"\s+", " ", str(language).strip().lower())
+    compact = normalized.replace("-", "").replace("_", "").replace(" ", "")
+    return LANGUAGE_ALIASES.get(normalized) or LANGUAGE_ALIASES.get(compact) or normalized
+
+
+def _tokenize_text(value: Any) -> List[str]:
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(value or ""))
+    tokens = re.findall(r"[a-zA-Z0-9+#.]+", text.lower())
+    result = []
+    for token in tokens:
+        token = TOKEN_ALIASES.get(token, token)
+        if token and token not in STOP_WORDS and len(token) > 1:
+            result.append(token)
+    return result
+
+
+def parse_github_repo_url(url: str) -> Optional[tuple[str, str]]:
+    """Extract (owner, repo) from common GitHub URL formats."""
+    cleaned = str(url or "").strip().rstrip("/")
+    if not cleaned:
+        return None
+
+    cleaned = re.sub(r"\.git$", "", cleaned)
+    match = re.search(r"github\.com[:/](?P<owner>[^/\s]+)/(?P<repo>[^/\s?#]+)", cleaned, re.IGNORECASE)
+    if not match and re.match(r"^[^/\s]+/[^/\s]+$", cleaned):
+        owner, repo = cleaned.split("/", 1)
+        return owner, re.sub(r"\.git$", "", repo)
+    if not match:
+        return None
+    return match.group("owner"), re.sub(r"\.git$", "", match.group("repo"))
+
 
 class RepoSelector:
     """Selects the most relevant repositories for a candidate."""
 
-    def __init__(self, github_token: Optional[str] = None):
+    def __init__(self, github_token: Optional[str] = None, max_rate_limit_wait: int = 60):
         self.token = github_token or config.GITHUB_TOKEN
         self.headers = {
             "Authorization": f"token {self.token}",
@@ -217,6 +315,7 @@ class RepoSelector:
             "User-Agent": "SignalStack-Agent/1.0"
         }
         self.api_base = "https://api.github.com"
+        self.max_rate_limit_wait = max_rate_limit_wait
         self._session = requests.Session()
         # Respect environment proxy settings if present.
         self._session.trust_env = True
@@ -240,12 +339,19 @@ class RepoSelector:
 
                 if response.status_code == 403 and remaining_int == 0 and reset_at:
                     wait = max(0, int(reset_at) - int(time.time())) + 2
+                    if wait > self.max_rate_limit_wait:
+                        logger.warning("[RepoSelector] Rate limit exhausted for %ss; skipping request.", wait)
+                        return None
                     logger.warning("[RepoSelector] Rate limit exhausted. Waiting %ss.", wait)
                     time.sleep(wait)
                     continue
 
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 60))
+                    try:
+                        retry_after = int(response.headers.get("Retry-After", 60))
+                    except ValueError:
+                        retry_after = 60
+                    retry_after = min(retry_after, self.max_rate_limit_wait)
                     logger.warning("[RepoSelector] 429 received. Waiting %ss (attempt %s).", retry_after, attempt + 1)
                     time.sleep(retry_after)
                     continue
@@ -268,7 +374,10 @@ class RepoSelector:
                 return None
             except requests.exceptions.RequestException as e:
                 logger.warning("[RepoSelector] Request error: %s", e)
-                return None
+                if attempt == max_retries - 1:
+                    return None
+                time.sleep((2 ** attempt) * 2)
+                continue
 
         logger.warning("[RepoSelector] All %s attempts failed for %s", max_retries, url)
         return None
@@ -320,28 +429,48 @@ class RepoSelector:
         if not keywords:
             return 0.0
 
-        repo_tokens = set(re.split(r'[-_\s]', repo_name.lower()))
+        repo_tokens = set(_tokenize_text(repo_name))
+        if not repo_tokens:
+            return 0.0
+
+        phrase_scores = []
         keyword_tokens = set()
         for kw in keywords:
-            keyword_tokens.update(re.split(r'[-_\s]', kw.lower()))
+            phrase_tokens = set(_tokenize_text(kw))
+            if not phrase_tokens:
+                continue
+            keyword_tokens.update(phrase_tokens)
+            overlap = repo_tokens & phrase_tokens
+            if not overlap:
+                continue
+            coverage = len(overlap) / len(phrase_tokens)
+            density = len(overlap) / len(repo_tokens)
+            phrase_scores.append((coverage * 0.75) + (density * 0.25))
 
-        if not keyword_tokens:
+        if not keyword_tokens or not phrase_scores:
             return 0.0
 
         intersection = repo_tokens & keyword_tokens
-        return len(intersection) / max(len(keyword_tokens), 1)
+        aggregate = len(intersection) / max(len(repo_tokens), 1)
+        score = max(max(phrase_scores), aggregate * 0.8)
+        return max(0.0, min(1.0, score))
 
     def _manifest_score(self, root_files: List[str]) -> tuple[float, bool, Optional[str]]:
         """
         Check for manifest files using fuzzy pattern matching.
         Returns (score, has_manifest, detected_language).
         """
-        detected_language = None
+        detected_languages = []
         for fname in root_files:
-            # Use pattern-based matching
-            if matches_any_pattern(fname, MANIFEST_PATTERNS):
-                detected_language = detect_language_from_file(fname)
-                return (1.0, True, detected_language)
+            detected_language = detect_language_from_file(fname)
+            if detected_language:
+                detected_languages.append(detected_language)
+        if detected_languages:
+            detected_language = max(
+                detected_languages,
+                key=lambda lang: MANIFEST_LANGUAGE_PRIORITY.get(lang, 0),
+            )
+            return (1.0, True, detected_language)
         return (0.0, False, None)
 
     def _recency_score(self, pushed_at: Optional[str]) -> float:
@@ -393,19 +522,20 @@ class RepoSelector:
         Score based on language match with job requirements.
         """
         # Popular languages get a boost when no specific requirements
-        POPULAR_LANGUAGES = ["python", "javascript", "typescript", "java", "go", "rust", "c++", "c#"]
+        POPULAR_LANGUAGES = ["python", "javascript", "typescript", "java", "go", "rust", "c++", "csharp"]
+        repo_lang = _canonical_language(repo_language)
         
         if not required_languages:
             # No requirements: score based on language popularity
-            if repo_language and repo_language.lower() in POPULAR_LANGUAGES:
+            if repo_lang and repo_lang in POPULAR_LANGUAGES:
                 return 0.7  # Boost for popular languages
             return 0.5  # Neutral
 
-        if not repo_language:
+        if not repo_lang:
             return 0.3  # Unknown language
 
-        repo_lang = repo_language.lower()
-        required = [lang.lower() for lang in required_languages]
+        required = [_canonical_language(lang) for lang in required_languages]
+        required = [lang for lang in required if lang]
 
         if repo_lang in required:
             return 1.0
@@ -415,7 +545,7 @@ class RepoSelector:
             "typescript": ["javascript", "typescript", "js", "ts"],
             "python": ["python", "jupyter notebook"],
             "java": ["kotlin", "scala"],
-            "c#": ["f#", "vb.net"],
+            "csharp": ["f#", "vb.net"],
         }
         for lang in required:
             if lang in related and repo_lang in related.get(lang, []):
@@ -443,10 +573,9 @@ class RepoSelector:
 
         # 1. If candidate provided a specific repo URL, include it
         if candidate.get("repo_url"):
-            url = candidate["repo_url"]
-            parts = url.rstrip("/").replace(".git", "").split("/")
-            if len(parts) >= 2:
-                owner, repo_name = parts[-2], parts[-1]
+            parsed = parse_github_repo_url(candidate["repo_url"])
+            if parsed:
+                owner, repo_name = parsed
                 repo_info = self._get_repo_info(owner, repo_name)
                 if repo_info:
                     repos_to_score.append(repo_info)
@@ -461,10 +590,9 @@ class RepoSelector:
         keywords = []
         if job:
             keywords.append(job.get("title", ""))
-            keywords.extend(job.get("required_languages", []))
             if job.get("description"):
                 # Extract meaningful words from description
-                desc_words = re.findall(r'\b[a-zA-Z]{4,}\b', job["description"])
+                desc_words = _tokenize_text(job["description"])
                 keywords.extend(desc_words[:10])
         if candidate.get("resume_projects"):
             keywords.extend(candidate["resume_projects"])
@@ -472,21 +600,21 @@ class RepoSelector:
         required_languages = job.get("required_languages", []) if job else []
 
         # 4. Score each repo
-        scored_repos: List[RepoScore] = []
+        scored_repos: List[tuple[tuple, RepoScore]] = []
         seen_repos = set()
 
         for repo_data in repos_to_score:
-            full_name = repo_data.get("full_name", "")
-            if full_name in seen_repos:
+            owner = repo_data.get("owner", {}).get("login", "")
+            repo_name = repo_data.get("name", "")
+            repo_key = (repo_data.get("full_name") or f"{owner}/{repo_name}").lower()
+            if repo_key in seen_repos:
                 continue
-            seen_repos.add(full_name)
+            seen_repos.add(repo_key)
 
             # Skip forks/tutorials
             if self._is_fork_or_tutorial(repo_data):
                 continue
 
-            owner = repo_data.get("owner", {}).get("login", "")
-            repo_name = repo_data.get("name", "")
             repo_url = repo_data.get("html_url", "")
             size_kb = repo_data.get("size", 0)
             pushed_at = repo_data.get("pushed_at")
@@ -527,7 +655,7 @@ class RepoSelector:
                     lang_match * 0.25
                 )
 
-            scored_repos.append(RepoScore(
+            score = RepoScore(
                 owner=owner,
                 repo=repo_name,
                 url=repo_url,
@@ -543,11 +671,22 @@ class RepoSelector:
                     "size": round(size_scr, 3),
                     "language_match": round(lang_match, 3),
                 }
-            ))
+            )
+            ideal_size_distance = abs(size_kb - 1000)
+            sort_key = (
+                -total_score,
+                -lang_match,
+                -manifest_val,
+                -name_score,
+                -recency,
+                ideal_size_distance,
+                repo_name.lower(),
+            )
+            scored_repos.append((sort_key, score))
 
         # 5. Sort by score descending and return top N
-        scored_repos.sort(key=lambda r: r.score, reverse=True)
-        return scored_repos[:max_repos]
+        scored_repos.sort(key=lambda item: item[0])
+        return [repo_score for _, repo_score in scored_repos[:max_repos]]
 
 
 def select_repos_for_candidate(

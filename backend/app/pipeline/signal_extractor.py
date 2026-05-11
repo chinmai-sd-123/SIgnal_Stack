@@ -239,8 +239,18 @@ class SignalExtractor:
         task_short = task_title[:30].replace(" ", "_") if task_title else "general"
 
         # ── Non-GitHub artifact ───────────────────────────────────────────────
+        repo_is_github = bool(repo_url and "github.com" in repo_url)
+        artifact_is_github = bool(artifact_link and "github.com" in artifact_link)
+
+        # Prefer GitHub/code evidence when both a repo and a resume/artifact link
+        # are present. Invite submissions include resume_url for profile context,
+        # but resumes should not be evaluated as proof-of-work for code tasks.
+        if not repo_is_github and artifact_is_github:
+            repo_url = artifact_link
+            repo_is_github = True
+
         target = artifact_link or repo_url
-        if target and "github.com" not in target:
+        if target and not repo_is_github:
             evidence.append(schemas.Evidence(
                 type="work_artifact",
                 ref=f"ARTIFACT:{task_short}",
@@ -249,7 +259,7 @@ class SignalExtractor:
             ))
             return evidence
 
-        if not repo_url or "github.com" not in repo_url:
+        if not repo_is_github:
             return []
 
         clean_repo_url = repo_url.rstrip("/")
@@ -427,7 +437,6 @@ class SignalExtractor:
             source_url=clean_repo_url,
         ))
 
-        evidence.sort(key=lambda e: e.ref.lower())
         return evidence
 
     # =========================================================================
@@ -575,6 +584,25 @@ class SignalExtractor:
         """
         title_lower = task_title.lower()
         collected: List[str] = []
+        task_stopwords = {
+            "build", "create", "implement", "add", "with", "using", "backend",
+            "frontend", "system", "service", "project", "application", "driven",
+        }
+        title_tokens = [
+            token for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_/-]{2,}", title_lower)
+            if token not in task_stopwords
+        ]
+        token_aliases = {
+            "authentication": ["auth"],
+            "authorization": ["auth"],
+            "limiting": ["limit"],
+            "migrations": ["migration"],
+            "deployment": ["deploy"],
+            "retrieval": ["retrieve"],
+        }
+        collected.extend(title_tokens)
+        for token in title_tokens:
+            collected.extend(token_aliases.get(token, []))
 
         KEYWORD_BUCKETS = [
             (

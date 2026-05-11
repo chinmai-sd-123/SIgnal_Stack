@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileCode, FileText, ChevronDown, ChevronUp, ExternalLink, AlertCircle, Code, GitBranch, Shield, CheckCircle, Terminal } from 'lucide-react';
+import { FileCode, FileText, ChevronDown, ChevronUp, ExternalLink, AlertCircle, GitBranch, Shield, CheckCircle, Terminal, Link } from 'lucide-react';
 
 const EvidenceItem = ({ evidence }) => {
     const [isExpanded, setIsExpanded] = useState(false);
@@ -21,7 +21,11 @@ const EvidenceItem = ({ evidence }) => {
     let Icon = FileText;
     let iconColor = "text-gray-400";
 
-    if (ref.startsWith('CODE:') || ref.startsWith('ENTRY:')) {
+    if (evidence.type === 'work_artifact' || ref.startsWith('ARTIFACT:')) {
+        displayTitle = "Supporting Artifact";
+        Icon = Link;
+        iconColor = "text-violet-600";
+    } else if (ref.startsWith('CODE:') || ref.startsWith('ENTRY:')) {
         // Format: CODE:task_name:file/path.ext
         const parts = ref.split(':');
         // Join back parts after the 2nd colon in case filename has colons
@@ -75,7 +79,7 @@ const EvidenceItem = ({ evidence }) => {
                     </div>
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-gray-700 truncate font-mono" title={displayTitle}>
+                            <span className="text-xs font-bold text-gray-700 break-all font-mono" title={displayTitle}>
                                 {displayTitle}
                             </span>
                             {isVerified && (
@@ -95,7 +99,7 @@ const EvidenceItem = ({ evidence }) => {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="p-1.5 text-gray-400 hover:text-primary rounded-md hover:bg-primary-soft transition-colors"
-                            title="Open in GitHub"
+                            title={evidence.type === 'work_artifact' ? 'Open artifact' : 'Open source'}
                             onClick={(e) => e.stopPropagation()}
                         >
                             <ExternalLink className="w-3.5 h-3.5" />
@@ -109,7 +113,7 @@ const EvidenceItem = ({ evidence }) => {
 
             {/* Code Content */}
             <div className={`border-t border-gray-100 bg-slate-50 relative ${isExpanded ? '' : ''}`}>
-                <pre className={`p-3 text-[11px] font-mono leading-relaxed text-gray-700 overflow-x-auto whitespace-pre-wrap ${!isExpanded && isLong ? 'max-h-[150px] opacity-90' : ''}`}>
+                <pre className={`p-3 text-[11px] font-mono leading-relaxed text-gray-700 overflow-x-auto whitespace-pre-wrap break-words ${!isExpanded && isLong ? 'max-h-[150px] opacity-90' : ''}`}>
                     {displayContent}
                 </pre>
 
@@ -133,7 +137,7 @@ const EvidenceItem = ({ evidence }) => {
             {isExpanded && sourceUrl && (
                 <div className="px-3 py-1.5 bg-gray-50 border-t border-gray-100 text-[10px] text-right">
                     <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-primary flex items-center justify-end gap-1 hover:underline">
-                        View source on GitHub <ExternalLink className="w-2.5 h-2.5" />
+                        {evidence.type === 'work_artifact' ? 'View artifact' : 'View source'} <ExternalLink className="w-2.5 h-2.5" />
                     </a>
                 </div>
             )}

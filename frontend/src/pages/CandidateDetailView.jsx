@@ -79,6 +79,17 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
         return styles[rating] || styles['Medium'];
     };
 
+    const getVerificationBadge = (status) => {
+        const styles = {
+            verified: 'bg-green-100 text-green-800 border-green-200',
+            unverified: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+            conflict: 'bg-red-100 text-red-800 border-red-200'
+        };
+        return styles[status] || styles.unverified;
+    };
+
+    const formatStatus = (value) => (value || 'unverified').replace(/_/g, ' ');
+
     return (
         <div className="max-w-5xl mx-auto px-4 py-6">
             {/* Back Button */}
@@ -111,10 +122,27 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
                                     <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getConfidenceBadge(candidate.confidence_rating)}`}>
                                         {candidate.confidence_rating} Confidence
                                     </span>
+                                    <span className={`px-3 py-1 rounded-full text-sm font-medium border capitalize ${getVerificationBadge(candidate.verification_status)}`}>
+                                        {formatStatus(candidate.verification_status)}
+                                    </span>
                                 </div>
                                 <p className="text-gray-500 mt-1">
                                     Passed <strong>{candidate.tasks_won}</strong> of {relevantAllocations.length || 'N/A'} tasks
                                 </p>
+                                <div className="mt-4 grid grid-cols-3 gap-2 text-xs max-w-md">
+                                    <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+                                        <div className="text-gray-400">Capability</div>
+                                        <div className="font-semibold text-gray-800">{Math.round((candidate.capability_score ?? candidate.overall_score) * 100)}%</div>
+                                    </div>
+                                    <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+                                        <div className="text-gray-400">Evidence</div>
+                                        <div className="font-semibold text-gray-800">{candidate.evidence_confidence != null ? `${Math.round(candidate.evidence_confidence * 100)}%` : 'N/A'}</div>
+                                    </div>
+                                    <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+                                        <div className="text-gray-400">Production</div>
+                                        <div className="font-semibold text-gray-800">{candidate.production_readiness != null ? `${Math.round(candidate.production_readiness * 100)}%` : 'N/A'}</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

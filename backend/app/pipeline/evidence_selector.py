@@ -19,6 +19,17 @@ import re
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 
+CODE_EXTENSIONS = (
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java", ".rb", ".php", ".cs"
+)
+
+PATH_KEYWORD_STOPWORDS = {
+    "app", "api", "backend", "server", "handler", "request", "response", "model",
+    "table", "column", "service", "function", "import", "export", "container",
+    "deployment", "image", "from", "run", "cmd",
+    "and", "or", "the", "with",
+}
+
 
 # Priority patterns with weights (higher = more important)
 PRIORITY_PATTERNS = [
@@ -105,16 +116,35 @@ def get_file_priority(file_path: str, keywords: Optional[List[str]] = None) -> T
     Returns (priority, category) tuple.
     """
     filename = file_path.split('/')[-1] if '/' in file_path else file_path
+    file_lower = file_path.lower()
+    filename_lower = filename.lower()
+
+    # Task-specific implementation files should outrank generic manifests,
+    # README, Docker, and CI files. Otherwise the LLM sees infrastructure before
+    # the actual code that proves capability.
+    if keywords:
+        match_count = 0
+        for kw in keywords:
+            kw_lower = kw.lower().strip()
+            if len(kw_lower) < 3 or kw_lower in PATH_KEYWORD_STOPWORDS:
+                continue
+            if kw_lower in file_lower:
+                match_count += 1
+        if match_count > 0:
+            middleware_boost = 1 if "/middleware/" in f"/{file_lower}" else 0
+            if filename_lower.endswith(CODE_EXTENSIONS):
+                return (120 + min(match_count, 10) + middleware_boost, "task_specific")
+            return (65 + min(match_count, 10), "task_specific")
     
     # Check against priority patterns
     for weight, pattern in PRIORITY_PATTERNS:
         if re.match(pattern, file_path, re.IGNORECASE) or re.match(pattern, filename, re.IGNORECASE):
             # Determine category from pattern
-            if 'package.json' in pattern or 'requirements' in pattern or 'go.mod' in pattern:
+            if filename_lower in {"package.json", "requirements.txt", "go.mod", "pyproject.toml", "pom.xml", "cargo.toml", "gemfile", "composer.json"}:
                 category = "manifest"
             elif 'index' in pattern or 'main' in pattern or 'app' in pattern:
                 category = "entry_point"
-            elif 'README' in pattern:
+            elif filename_lower.startswith("readme"):
                 category = "readme"
             elif 'github' in pattern or 'gitlab' in pattern or 'circleci' in pattern:
                 category = "ci_config"
@@ -134,13 +164,6 @@ def get_file_priority(file_path: str, keywords: Optional[List[str]] = None) -> T
                 category = "documentation"
             
             return (weight, category)
-    
-    # Keyword matching (task-specific)
-    if keywords:
-        file_lower = file_path.lower()
-        for kw in keywords:
-            if kw.lower() in file_lower:
-                return (65, "task_specific")  # High priority for keyword matches
     
     # Default low priority for other files
     return (0, "other")

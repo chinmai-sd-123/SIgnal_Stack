@@ -5,7 +5,7 @@ Implements deterministic scoring per task with:
 - Signal weight loading
 - Raw score computation: Σ(signal * weight)
 - Normalization against ALL defined weights (not just present ones)
-- Authorship capping (only if authorship was explicitly computed and < 0.2)
+- Authorship risk handling (soft penalty below 0.2; cap only near zero)
 - Fork hard-cap (is_fork=1 and fork_is_unmodified=1 → cap at 0.3)
 - Work allocation generation
 """
@@ -32,31 +32,40 @@ class ScoringResult:
         return asdict(self)
 
 
-# Default signal weights (used if not in database)
+# Default signal weights (used if not in database).
+#
+# These weights are intentionally application-stage friendly: production hygiene
+# signals such as tests, CI, Docker, and deployment readiness help, but they
+# should not overwhelm evidence that a candidate actually built the thing.
 DEFAULT_WEIGHTS = {
-    "authorship_fraction":   0.25,
-    "tests_present":         0.15,
-    "ci_cd_present":         0.10,   # evaluator uses ci_cd_present; keep alias
-    "ci_present":            0.10,   # deterministic_signals uses ci_present
-    "deployment_ready":      0.10,
-    "dockerfile_present":    0.10,
-    "migrations_present":    0.08,
-    "schema_present":        0.08,
-    "rate_limiting_present": 0.05,
-    "readme_quality_score":  0.07,
+    "authorship_fraction":   0.18,
+    "web_framework":         0.10,
+    "valid_repo":            0.08,
+    "recent_activity_score": 0.08,
+    "readme_quality_score":  0.08,
+    "tests_present":         0.07,
+    "ci_cd_present":         0.04,   # evaluator uses ci_cd_present
+    "ci_present":            0.00,   # alias handled in compute_raw_score
+    "deployment_ready":      0.06,
+    "dockerfile_present":    0.04,
+    "migrations_present":    0.06,
+    "schema_present":        0.06,
+    "rate_limiting_present": 0.04,
+    "commit_count":          0.04,
     # Legacy / supplementary
-    "valid_repo":            0.02,
     "ml_model_present":      0.03,
     "ml_libraries":          0.02,
-    "frontend_present":      0.02,
-    "static_assets":         0.01,
+    "frontend_present":      0.04,
+    "static_assets":         0.02,
 }
 
 # Sum of all default weights — used as normalization denominator
 _DEFAULT_WEIGHT_SUM = sum(DEFAULT_WEIGHTS.values())
 
 AUTHORSHIP_CAP_THRESHOLD = 0.2
-MAX_SCORE_WITHOUT_AUTHORSHIP = 0.2
+VERY_LOW_AUTHORSHIP_THRESHOLD = 0.05
+LOW_AUTHORSHIP_PENALTY = 0.10
+MAX_SCORE_WITHOUT_AUTHORSHIP = 0.65
 FORK_UNMODIFIED_CAP = 0.3
 
 
@@ -106,6 +115,8 @@ def compute_raw_score(
 
         value = min(max(_extract_value(signal_data), 0.0), 1.0)
         weight = weights.get(signal_name, 0.0)
+        if signal_name == "ci_present" and "ci_cd_present" not in signals:
+            weight = weights.get("ci_cd_present", weight)
         contribution = value * weight
 
         breakdown[signal_name] = {
@@ -149,13 +160,18 @@ def apply_authorship_cap(
         capped = min(capped, FORK_UNMODIFIED_CAP)
 
     # ── Authorship cap ───────────────────────────────────────────────────────
-    # Only cap when the key is explicitly present (i.e. the pipeline ran the
+    # Only act when the key is explicitly present (i.e. the pipeline ran the
     # authorship extractor and got a real answer, even if that answer is low).
+    # Mildly low authorship is a risk flag plus soft penalty; near-zero
+    # authorship remains capped because it is a stronger copied-work signal.
     if "authorship_fraction" in signals:
         authorship_fraction = _extract_value(signals["authorship_fraction"])
-        if authorship_fraction < AUTHORSHIP_CAP_THRESHOLD:
+        if authorship_fraction < VERY_LOW_AUTHORSHIP_THRESHOLD:
             risk_flags.append("low_authorship")
             capped = min(capped, MAX_SCORE_WITHOUT_AUTHORSHIP)
+        elif authorship_fraction < AUTHORSHIP_CAP_THRESHOLD:
+            risk_flags.append("low_authorship")
+            capped = max(0.0, capped - LOW_AUTHORSHIP_PENALTY)
 
     return capped, risk_flags
 
@@ -175,6 +191,8 @@ def compute_confidence(
         if signal_name.startswith("_"):
             continue
         weight = weights.get(signal_name, 0.0)
+        if signal_name == "ci_present" and "ci_cd_present" not in signals:
+            weight = weights.get("ci_cd_present", weight)
         if weight > 0 and _extract_value(signal_data) > 0:
             covered_weight += weight
 

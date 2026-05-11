@@ -44,7 +44,8 @@ def _create_proofs_for_submission(db: Session, submission: InviteSubmission, job
             payload_json={
                 "repo_url": submission.repo_url or "",
                 "leetcode_username": submission.leetcode_username or "",
-                "artifact_link": submission.resume_url or "",
+                "artifact_link": "" if submission.repo_url else (submission.resume_url or ""),
+                "resume_url": submission.resume_url or "",
                 "context": submission.context or "",
                 "candidate_name": submission.candidate_name,
                 "candidate_email": submission.candidate_email,
@@ -96,7 +97,8 @@ def _update_proofs_for_submission(db: Session, submission: InviteSubmission, old
             proof.payload_json = {
                 "repo_url": submission.repo_url or "",
                 "leetcode_username": submission.leetcode_username or "",
-                "artifact_link": submission.resume_url or "",
+                "artifact_link": "" if submission.repo_url else (submission.resume_url or ""),
+                "resume_url": submission.resume_url or "",
                 "context": submission.context or "",
                 "candidate_name": submission.candidate_name,
                 "candidate_email": submission.candidate_email,

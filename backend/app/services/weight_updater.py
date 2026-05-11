@@ -45,13 +45,20 @@ def get_current_weight(db: Session, signal_name: str, task_id: str = None) -> fl
     
     # Default weights
     defaults = {
-        "authorship_fraction": 0.25,
-        "tests_present": 0.15,
-        "ci_present": 0.10,
-        "dockerfile_present": 0.10,
-        "schema_present": 0.10,
-        "rate_limiting_present": 0.05,
-        "readme_quality_score": 0.10,
+        "authorship_fraction": 0.18,
+        "web_framework": 0.10,
+        "valid_repo": 0.08,
+        "recent_activity_score": 0.08,
+        "readme_quality_score": 0.08,
+        "tests_present": 0.07,
+        "ci_present": 0.0,
+        "ci_cd_present": 0.04,
+        "deployment_ready": 0.06,
+        "dockerfile_present": 0.04,
+        "migrations_present": 0.06,
+        "schema_present": 0.06,
+        "rate_limiting_present": 0.04,
+        "commit_count": 0.04,
     }
     return defaults.get(signal_name, 0.1)
 

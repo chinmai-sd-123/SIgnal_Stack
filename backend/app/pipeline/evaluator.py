@@ -25,6 +25,79 @@ def _avg_dimensions(summaries: List) -> Dict:
         return None
     return {k: round(v / count, 2) for k, v in dim_totals.items()}
 
+
+def _production_readiness(signals: Dict) -> float:
+    """Score production hygiene separately from capability."""
+    checks = {
+        "tests_present": 0.25,
+        "ci_cd_present": 0.15,
+        "deployment_ready": 0.15,
+        "dockerfile_present": 0.10,
+        "readme_quality_score": 0.15,
+        "rate_limiting_present": 0.10,
+        "migrations_present": 0.10,
+    }
+    total = sum(checks.values())
+    if total <= 0:
+        return 0.0
+
+    score = 0.0
+    for key, weight in checks.items():
+        value = signals.get(key, 0.0)
+        if isinstance(value, dict):
+            value = value.get("value", 0.0)
+        if key == "readme_quality_score":
+            score += min(max(float(value or 0.0), 0.0), 1.0) * weight
+        elif float(value or 0.0) > 0:
+            score += weight
+    return round(score / total, 3)
+
+
+def _verification_status(signals: Dict, risk_flags: List[str]) -> str:
+    """Expose authorship as trust state, not the core capability score."""
+    if "fork_unmodified" in risk_flags:
+        return "conflict"
+    if "authorship_fraction" not in signals:
+        return "unverified"
+
+    value = signals.get("authorship_fraction", 0.0)
+    if isinstance(value, dict):
+        value = value.get("value", 0.0)
+    authorship_fraction = float(value or 0.0)
+    if authorship_fraction >= 0.2:
+        return "verified"
+    if authorship_fraction < 0.05:
+        return "conflict"
+    return "unverified"
+
+
+def _confidence_rating(capability: float, evidence_confidence: float, verification_status: str) -> str:
+    if verification_status == "conflict":
+        return "Low"
+    combined = capability * 0.7 + evidence_confidence * 0.3
+    if combined >= 0.75:
+        return "High"
+    if combined >= 0.45:
+        return "Medium"
+    return "Low"
+
+
+def _candidate_quality(signals: Dict, capability_score: float) -> Dict:
+    scoring = score_candidate(signals) if signals else None
+    risk_flags = scoring.risk_flags if scoring else []
+    evidence_confidence = scoring.confidence if scoring else 0.0
+    production_readiness = _production_readiness(signals or {})
+    verification_status = _verification_status(signals or {}, risk_flags)
+    return {
+        "capability_score": round(capability_score, 2),
+        "evidence_confidence": round(evidence_confidence, 2),
+        "production_readiness": round(production_readiness, 2),
+        "verification_status": verification_status,
+        "confidence_rating": _confidence_rating(capability_score, evidence_confidence, verification_status),
+        "risk_flags": sorted(risk_flags),
+        "scoring": scoring,
+    }
+
 class Evaluator:
     def __init__(self):
         self.matcher = Matcher()
@@ -135,8 +208,8 @@ class Evaluator:
                         ))
 
                 # 2. LLM Interpretation
-                # Sort evidence for deterministic LLM input
-                task_evidence.sort(key=lambda e: e.ref.lower())
+                # Keep extractor priority order so task-specific implementation
+                # snippets reach the LLM before generic manifests or README.
                 evidence_dicts = [e.model_dump() for e in task_evidence]
                 interpretation = llm.interpret_signals(
                     task.description if hasattr(task, 'description') else task.name, 
@@ -229,8 +302,6 @@ class Evaluator:
 
         # NEW: Build candidate summaries
         candidate_summaries = []
-        all_scores = [cs['total_score'] / max(cs['task_count'], 1) for cs in candidate_stats.values() if cs['task_count'] > 0]
-        max_score = max(all_scores) if all_scores else 0
         
         for cand_id, stats in candidate_stats.items():
             if stats['task_count'] == 0:
@@ -238,24 +309,19 @@ class Evaluator:
             
             avg_score = stats['total_score'] / stats['task_count']
             
-            # Calculate confidence rating based on score differential
-            if max_score > 0:
-                score_ratio = avg_score / max_score
-                if score_ratio >= 0.9:
-                    confidence = "High"
-                elif score_ratio >= 0.7:
-                    confidence = "Medium"
-                else:
-                    confidence = "Low"
-            else:
-                confidence = "Low"
+            quality = _candidate_quality(signals_map.get(cand_id, {}), avg_score)
             
             candidate_summaries.append(schemas.CandidateSummary(
                 candidate_id=cand_id,
                 overall_score=round(avg_score, 2),
+                capability_score=quality["capability_score"],
+                evidence_confidence=quality["evidence_confidence"],
+                production_readiness=quality["production_readiness"],
+                verification_status=quality["verification_status"],
                 tasks_won=stats['wins'],
                 dimensions=stats['dimensions'],
-                confidence_rating=confidence
+                confidence_rating=quality["confidence_rating"],
+                risk_flags=quality["risk_flags"],
             ))
         
         # Sort summaries by overall_score descending
@@ -264,19 +330,34 @@ class Evaluator:
         # Run the top candidate's signals through the scoring engine for
         # authoritative capping + risk flags, then blend with LLM scores.
         top_candidate_id = candidate_summaries[0].candidate_id if candidate_summaries else None
+        top_quality = None
         if top_candidate_id and top_candidate_id in signals_map:
             top_signals = signals_map[top_candidate_id]
-            scoring = score_candidate(top_signals)
+            top_capability = candidate_summaries[0].capability_score or raw_final
+            top_quality = _candidate_quality(top_signals, top_capability)
+            scoring = top_quality["scoring"]
             all_risk_flags = scoring.risk_flags
-            # Blend: 60% task-weighted LLM score, 40% deterministic scoring engine
-            final_score = round(raw_final * 0.6 + scoring.capped_score * 0.4, 3)
+            # Let direct task evidence lead for early applications. Deterministic
+            # project-health signals still matter, but missing tests/CI should
+            # not overpower a relevant working implementation.
+            final_score = round(raw_final * 0.75 + scoring.capped_score * 0.25, 3)
         else:
             final_score = round(raw_final, 3)
+            top_quality = {
+                "capability_score": round(raw_final, 2),
+                "evidence_confidence": 0.0,
+                "production_readiness": 0.0,
+                "verification_status": "unverified",
+            }
 
         return schemas.EvaluationResponse(
             job_id=outcome.id,
             job_title=None,  # Injected by route handler
             fit_score=round(final_score, 2),
+            capability_score=top_quality["capability_score"],
+            evidence_confidence=top_quality["evidence_confidence"],
+            production_readiness=top_quality["production_readiness"],
+            verification_status=top_quality["verification_status"],
             work_allocation=allocations,
             global_signals_used=sorted(list(global_signals_used)),
             risk_flags=sorted(all_risk_flags) if all_risk_flags else [],

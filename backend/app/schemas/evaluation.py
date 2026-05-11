@@ -23,9 +23,14 @@ class CandidateScore(BaseModel):
 class CandidateSummary(BaseModel):
     candidate_id: str
     overall_score: float  # Average score across all tasks
+    capability_score: Optional[float] = None  # Direct task/code evidence score
+    evidence_confidence: Optional[float] = None  # Signal coverage / evidence completeness
+    production_readiness: Optional[float] = None  # Tests/CI/deploy/docs hygiene
+    verification_status: str = "unverified"  # verified | unverified | conflict
     tasks_won: int        # Number of tasks where this candidate is best
     dimensions: Optional[Dict[str, float]] = None  # Radar chart data
     confidence_rating: str = "Medium"  # "High", "Medium", "Low"
+    risk_flags: List[str] = []
 
 class WorkAllocation(BaseModel):
     task_id: str
@@ -41,6 +46,10 @@ class EvaluationResponse(BaseModel):
     job_id: str
     job_title: Optional[str] = None
     fit_score: float
+    capability_score: Optional[float] = None
+    evidence_confidence: Optional[float] = None
+    production_readiness: Optional[float] = None
+    verification_status: str = "unverified"
     work_allocation: List[WorkAllocation]
     global_signals_used: List[str]
     risk_flags: List[str]

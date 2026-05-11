@@ -152,6 +152,17 @@ export default function EvaluationView() {
         return styles[rating] || styles['Medium'];
     };
 
+    const getVerificationBadge = (status) => {
+        const styles = {
+            verified: 'bg-green-100 text-green-800 border-green-200',
+            unverified: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+            conflict: 'bg-red-100 text-red-800 border-red-200',
+        };
+        return styles[status] || styles.unverified;
+    };
+
+    const formatStatus = (value) => (value || 'unverified').replace(/_/g, ' ');
+
     // Memoize summaries to prevent recalculation on every render
     const fallbackSummaries = useMemo(() => {
         if (!evaluation) return [];
@@ -174,12 +185,16 @@ export default function EvaluationView() {
                 ? wonTasks.reduce((acc, t) => acc + t.confidence, 0) / wonTasks.length
                 : 0;
 
-            return {
-                candidate_id: candidateName,
-                overall_score: avgConf,
-                tasks_won: wonTasks.length,
-                dimensions: evaluation.dimensions,
-                confidence_rating: avgConf > 0.7 ? 'High' : avgConf > 0.4 ? 'Medium' : 'Low'
+                            return {
+                                candidate_id: candidateName,
+                                overall_score: avgConf,
+                                capability_score: avgConf,
+                                evidence_confidence: null,
+                                production_readiness: null,
+                                verification_status: 'unverified',
+                                tasks_won: wonTasks.length,
+                                dimensions: evaluation.dimensions,
+                                confidence_rating: avgConf > 0.7 ? 'High' : avgConf > 0.4 ? 'Medium' : 'Low'
             };
         }).sort((a, b) => b.overall_score - a.overall_score); // Sort by highest score
     }, [evaluation]);
@@ -305,6 +320,24 @@ export default function EvaluationView() {
                                 <span className="text-2xl font-medium opacity-70">%</span>
                             </div>
                             <p className="text-sm opacity-70 mt-2">Based on {evaluation.work_allocation.length} tasks</p>
+                            <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                                <div className="bg-white/15 rounded-lg px-3 py-2">
+                                    <div className="opacity-70">Capability</div>
+                                    <div className="font-bold">{Math.round((evaluation.capability_score ?? evaluation.fit_score) * 100)}%</div>
+                                </div>
+                                <div className="bg-white/15 rounded-lg px-3 py-2">
+                                    <div className="opacity-70">Evidence</div>
+                                    <div className="font-bold">{evaluation.evidence_confidence != null ? `${Math.round(evaluation.evidence_confidence * 100)}%` : 'N/A'}</div>
+                                </div>
+                                <div className="bg-white/15 rounded-lg px-3 py-2">
+                                    <div className="opacity-70">Production</div>
+                                    <div className="font-bold">{evaluation.production_readiness != null ? `${Math.round(evaluation.production_readiness * 100)}%` : 'N/A'}</div>
+                                </div>
+                                <div className="bg-white/15 rounded-lg px-3 py-2">
+                                    <div className="opacity-70">Verification</div>
+                                    <div className="font-bold capitalize">{formatStatus(evaluation.verification_status)}</div>
+                                </div>
+                            </div>
                         </div>
                         <div className="flex flex-col items-end gap-2">
                             <div className="flex items-center gap-2 bg-white/20 rounded-full px-4 py-2">
@@ -421,6 +454,9 @@ export default function EvaluationView() {
                                                     <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium border ${getConfidenceBadge(candidate.confidence_rating)}`}>
                                                         {candidate.confidence_rating}
                                                     </span>
+                                                    <span className={`inline-block mt-1 ml-1 px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${getVerificationBadge(candidate.verification_status)}`}>
+                                                        {formatStatus(candidate.verification_status)}
+                                                    </span>
                                                 </div>
                                             </div>
                                             <span className={`text-2xl font-bold ${getScoreColor(candidate.overall_score)}`}>
@@ -430,6 +466,20 @@ export default function EvaluationView() {
 
                                         <div className="text-sm text-gray-600 mb-6">
                                             <span className="font-semibold text-gray-900">{candidate.tasks_won}</span> tasks passed
+                                            <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                                                <div className="rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5">
+                                                    <div className="text-gray-400">Capability</div>
+                                                    <div className="font-semibold text-gray-800">{Math.round((candidate.capability_score ?? candidate.overall_score) * 100)}%</div>
+                                                </div>
+                                                <div className="rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5">
+                                                    <div className="text-gray-400">Evidence</div>
+                                                    <div className="font-semibold text-gray-800">{candidate.evidence_confidence != null ? `${Math.round(candidate.evidence_confidence * 100)}%` : 'N/A'}</div>
+                                                </div>
+                                                <div className="rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5">
+                                                    <div className="text-gray-400">Production</div>
+                                                    <div className="font-semibold text-gray-800">{candidate.production_readiness != null ? `${Math.round(candidate.production_readiness * 100)}%` : 'N/A'}</div>
+                                                </div>
+                                            </div>
                                         </div>
 
                                         <div className="flex flex-col gap-2 mt-auto">

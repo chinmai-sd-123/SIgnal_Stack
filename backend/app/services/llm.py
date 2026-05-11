@@ -243,12 +243,16 @@ class OpenAILLMService:
                     "You assess relevance, quality, and clarity of contribution."
                 )
                 scoring_rules = """
-SCORING RULES (follow strictly):
+SCORING RULES:
 - 0.0–0.2: Artifact is unrelated to the task or missing entirely.
 - 0.2–0.4: Artifact exists but relevance to the task is weak or unclear.
 - 0.4–0.6: Artifact is relevant but lacks depth, specificity, or professionalism.
 - 0.6–0.8: Artifact clearly supports the task with good quality evidence.
 - 0.8–1.0: Artifact is directly on-point, high quality, and demonstrates clear ownership.
+
+EARLY APPLICATION GUIDANCE:
+- Treat tests, CI, Docker, and deployment files as bonus quality signals for personal projects, not baseline requirements.
+- A working, relevant implementation can score in the 0.6-0.8 range even without tests or CI.
 
 PENALTIES (apply before scoring):
 - If the artifact description could apply to any candidate generically: -0.2
@@ -268,12 +272,13 @@ SCORING RULES (follow strictly):
 - 0.8–1.0: Full, working implementation with tests, error handling, and clean structure.
 
 PENALTIES (apply before scoring):
-- If DETERMINISTIC FACTS show tests_present=NO but task requires testing: -0.15
-- If DETERMINISTIC FACTS show ci_cd_present=NO for a deployment task: -0.10
-- If authorship is unverified or the top committer does not match the candidate: -0.15
+- If DETERMINISTIC FACTS show tests_present=NO and the task explicitly requires tests or production-grade reliability: -0.05
+- If DETERMINISTIC FACTS show ci_cd_present=NO and the task is specifically about deployment, CI/CD, or DevOps automation: -0.05
+- If authorship is unverified: do not penalize; mention it as uncertainty only.
+- If the top committer explicitly conflicts with the candidate identity: -0.08
 - If is_fork=YES and fork_is_unmodified=YES: cap strength at 0.3
-- If only a README mentions the feature but no implementation code is found: cap at 0.35
-- If code appears AI-generated (no comments, perfect structure, no git history): -0.1
+- If only a README mentions the feature but no implementation code is found: cap at 0.45
+- If code appears copied/template-generated with no candidate-specific implementation changes: -0.1
 
 IMPORTANT: You may only cite evidence that appears verbatim in the provided sections above.
 Do not invent file names, function names, or quotes.
@@ -295,7 +300,7 @@ YOUR RESPONSE MUST:
 1. Score based on what the code ACTUALLY DOES, not what the README claims.
 2. Set relevant_evidence to a direct quote or file reference from the CODE EVIDENCE section above.
    If no code evidence exists, write "No code evidence found."
-3. Not give scores above 0.5 unless working implementation code is present in CODE EVIDENCE.
+3. Not give scores above 0.6 unless working implementation code is present in CODE EVIDENCE.
 4. Apply all applicable penalties before arriving at your final strength score.
 
 Respond with JSON only. No explanation outside the JSON.
