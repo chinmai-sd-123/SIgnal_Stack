@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import app.schemas as schemas
 from app.config.database import SessionLocal
 from app.models.invite import InviteSubmission
+from app.models.evaluation import Evaluation
 from app.models.job import Job
 from app.models.job_candidate import JobCandidate
 from app.models.outcome import Outcome
@@ -35,7 +36,9 @@ def ensure_job_candidate(db, job_id: str, candidate_id: str, status: str = "subm
     ).first()
 
     if candidate:
-        if candidate.status in {"applied", "submitted", "failed"} and status:
+        if status == "queued" and candidate.status in {"applied", "submitted", "failed"}:
+            candidate.status = status
+        elif status == "evaluating" and candidate.status in {"applied", "submitted", "failed", "queued"}:
             candidate.status = status
         return candidate
 
@@ -61,6 +64,37 @@ def _proof_to_schema(proof: Proof) -> schemas.ProofCreate:
 
 def _safe_public_signals(signals: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in (signals or {}).items() if not k.startswith("_")}
+
+
+def _job_outcome_ids(db, job_id: str) -> List[str]:
+    rows = db.query(Outcome.id).filter(Outcome.job_id == job_id).all()
+    return [row[0] for row in rows]
+
+
+def _find_submission_proof(db, submission: InviteSubmission, candidate_id: str) -> Optional[Proof]:
+    """
+    Find the proof linked to this exact submission, scoped to this job.
+
+    The submission id is the strongest link. The job/outcome scope keeps the
+    fallback from accidentally using a proof from another job for the same
+    candidate id.
+    """
+    outcome_ids = _job_outcome_ids(db, submission.job_id)
+    if not outcome_ids:
+        return None
+
+    candidate_proofs = db.query(Proof).filter(
+        Proof.candidate_id == candidate_id,
+        Proof.outcome_id.in_(outcome_ids),
+    ).all()
+
+    return next(
+        (
+            item for item in candidate_proofs
+            if (item.payload_json or {}).get("invite_submission_id") == submission.id
+        ),
+        candidate_proofs[0] if candidate_proofs else None,
+    )
 
 
 def _verification_status(signals: Dict[str, Any], risk_flags: List[str]) -> str:
@@ -129,14 +163,7 @@ def _screen_submission(db, submission: InviteSubmission, extractor: SignalExtrac
     submission.status = "evaluating"
     db.commit()
 
-    candidate_proofs = db.query(Proof).filter(Proof.candidate_id == candidate_id).all()
-    proof = next(
-        (
-            item for item in candidate_proofs
-            if (item.payload_json or {}).get("invite_submission_id") == submission.id
-        ),
-        candidate_proofs[0] if candidate_proofs else None,
-    )
+    proof = _find_submission_proof(db, submission, candidate_id)
 
     if not proof:
         _mark_failure(db, candidate, submission, "No proof record found for submission.")
@@ -363,6 +390,8 @@ def mark_job_submissions_queued(db, job_id: str, rerun_evaluated: bool = False) 
 def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
     submissions = db.query(InviteSubmission).filter(InviteSubmission.job_id == job_id).all()
     candidates = db.query(JobCandidate).filter(JobCandidate.job_id == job_id).all()
+    outcomes = db.query(Outcome).filter(Outcome.job_id == job_id).all()
+    outcome_ids = [outcome.id for outcome in outcomes]
 
     submission_counts: Dict[str, int] = defaultdict(int)
     for submission in submissions:
@@ -375,10 +404,25 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
     evaluated = [c for c in candidates if c.evaluation_score is not None]
     evaluated.sort(key=lambda c: c.evaluation_score or 0.0, reverse=True)
 
+    evaluations = []
+    if outcome_ids:
+        evaluations = db.query(Evaluation).filter(Evaluation.outcome_id.in_(outcome_ids)).all()
+    evaluated_outcome_ids = {item.outcome_id for item in evaluations if item.evaluation_json}
+
     return {
         "job_id": job_id,
         "submissions_total": len(submissions),
         "candidates_total": len(candidates),
+        "outcomes_total": len(outcomes),
+        "outcomes_evaluated": len(evaluated_outcome_ids),
+        "outcome_statuses": [
+            {
+                "outcome_id": outcome.id,
+                "title": outcome.title,
+                "status": "evaluated" if outcome.id in evaluated_outcome_ids else "pending",
+            }
+            for outcome in outcomes
+        ],
         "submission_status_counts": dict(sorted(submission_counts.items())),
         "candidate_status_counts": dict(sorted(candidate_counts.items())),
         "active_count": sum(candidate_counts.get(status, 0) for status in ACTIVE_STATUSES),

@@ -364,6 +364,7 @@ export default function JobDetail() {
                                 <h3 className="font-semibold text-gray-900">Evaluation Progress</h3>
                                 <p className="text-xs text-gray-500">
                                     {evaluationProgress.evaluated_count || 0} evaluated from {evaluationProgress.submissions_total || 0} submissions
+                                    {evaluationProgress.outcomes_total ? ` - ${evaluationProgress.outcomes_evaluated || 0}/${evaluationProgress.outcomes_total} outcomes ready` : ''}
                                     {evaluationProgress.queue_size ? ` - queue: ${evaluationProgress.queue_size}` : ''}
                                 </p>
                             </div>
@@ -399,6 +400,22 @@ export default function JobDetail() {
                                 {evaluationProgress.top_candidates.slice(0, 5).map(candidate => (
                                     <span key={candidate.candidate_id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary-soft text-primary-hover text-xs font-semibold">
                                         {candidate.candidate_id}: {Math.round(candidate.score || 0)}%
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+                        {evaluationProgress.outcome_statuses?.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                {evaluationProgress.outcome_statuses.map(outcome => (
+                                    <span
+                                        key={outcome.outcome_id}
+                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                                            outcome.status === 'evaluated'
+                                                ? 'bg-green-50 text-green-700 border border-green-200'
+                                                : 'bg-gray-50 text-gray-600 border border-gray-200'
+                                        }`}
+                                    >
+                                        {outcome.title}: {outcome.status}
                                     </span>
                                 ))}
                             </div>
