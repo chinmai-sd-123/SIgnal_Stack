@@ -288,6 +288,41 @@ def _mark_failure(db, candidate: JobCandidate, submission: Optional[InviteSubmis
     db.commit()
 
 
+def _recover_interrupted_evaluations(db, job_id: str) -> int:
+    """
+    If the process died while a Redis task was processing, DB rows can be left
+    in evaluating even though no worker owns them anymore. Move those rows back
+    to queued before a recovered task runs.
+    """
+    recovered = 0
+
+    submissions = db.query(InviteSubmission).filter(
+        InviteSubmission.job_id == job_id,
+        InviteSubmission.status == "evaluating",
+    ).all()
+    for submission in submissions:
+        submission.status = "queued"
+        recovered += 1
+
+    candidates = db.query(JobCandidate).filter(
+        JobCandidate.job_id == job_id,
+        JobCandidate.status == "evaluating",
+        JobCandidate.evaluation_score.is_(None),
+    ).all()
+    for candidate in candidates:
+        candidate.status = "queued"
+        candidate.evaluation_data = {
+            **(candidate.evaluation_data or {}),
+            "stage": "queued",
+            "recovered_at": utc_now().isoformat(),
+        }
+
+    if recovered or candidates:
+        db.commit()
+
+    return recovered
+
+
 def _screen_submission(db, submission: InviteSubmission, extractor: SignalExtractor) -> Dict[str, Any]:
     candidate_id = candidate_id_for_submission(submission)
     candidate = ensure_job_candidate(db, submission.job_id, candidate_id, status="evaluating")
@@ -425,6 +460,8 @@ def evaluate_job_applications_sync(
         job = db.query(Job).filter(Job.id == job_id).first()
         if not job:
             raise ValueError(f"Job not found: {job_id}")
+
+        _recover_interrupted_evaluations(db, job_id)
 
         query = db.query(InviteSubmission).filter(
             InviteSubmission.job_id == job_id,

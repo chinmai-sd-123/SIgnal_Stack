@@ -43,6 +43,34 @@ class _FakeProofDb:
         return _FakeProofQuery(self.proofs)
 
 
+class _FakeRecoveryQuery:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def all(self):
+        return self.rows
+
+
+class _FakeRecoveryDb:
+    def __init__(self, submissions, candidates):
+        self.submissions = submissions
+        self.candidates = candidates
+        self.commits = 0
+
+    def query(self, model):
+        if model is InviteSubmission:
+            return _FakeRecoveryQuery(self.submissions)
+        if model is JobCandidate:
+            return _FakeRecoveryQuery(self.candidates)
+        return _FakeRecoveryQuery([])
+
+    def commit(self):
+        self.commits += 1
+
+
 class _Proof:
     def __init__(self, invite_submission_id, outcome_id="outcome-1"):
         self.outcome_id = outcome_id
@@ -112,3 +140,25 @@ def test_queue_job_evaluation_uses_redis_when_available(monkeypatch):
     assert task_id
     assert fake_redis.items[0][0] == bulk.REDIS_JOB_EVAL_QUEUE
     assert f"{bulk.REDIS_JOB_EVAL_TASK_PREFIX}:{task_id}" in fake_redis.values
+
+
+@pytest.mark.unit
+def test_recover_interrupted_evaluations_requeues_stuck_rows():
+    submission = InviteSubmission(id="sub-1", job_id="job-1", status="evaluating")
+    candidate = JobCandidate(
+        id="cand-1",
+        job_id="job-1",
+        candidate_id="candidate-1",
+        status="evaluating",
+        evaluation_score=None,
+        evaluation_data={"stage": "evaluating"},
+    )
+    db = _FakeRecoveryDb([submission], [candidate])
+
+    recovered = bulk._recover_interrupted_evaluations(db, "job-1")
+
+    assert recovered == 1
+    assert submission.status == "queued"
+    assert candidate.status == "queued"
+    assert candidate.evaluation_data["stage"] == "queued"
+    assert db.commits == 1
