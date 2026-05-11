@@ -32,7 +32,7 @@ export default function Admin() {
                 const data = await res.json();
                 setAuditLogs(data);
             } else if (activeTab === 'llm') {
-                const res = await fetch(`${API_BASE}/admin/llm-logs`);
+                const res = await fetch(`${API_BASE}/admin/feedback`);
                 const feedbackData = await res.json();
                 setLlmLogs(feedbackData);
             }
@@ -190,10 +190,10 @@ export default function Admin() {
                                                 >
                                                     <div className="flex items-center gap-3">
                                                         <FileText className="w-4 h-4 text-primary" />
-                                                        <span className="font-medium text-gray-900">Eval: {log.evaluation_id || 'N/A'}</span>
-                                                        <span className={`px-2 py-0.5 rounded text-xs ${log.is_valid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                                        <span className="font-medium text-gray-900">Job: {log.job_id}</span>
+                                                        <span className={`px-2 py-0.5 rounded text-xs ${log.result === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                                                             }`}>
-                                                            {log.latency_ms}ms
+                                                            {log.result}
                                                         </span>
                                                     </div>
                                                     <div className="flex items-center gap-3">
@@ -203,13 +203,8 @@ export default function Admin() {
                                                 </button>
                                                 {expandedLog === i && (
                                                     <div className="p-4 border-t border-gray-100 bg-gray-50">
-                                                        <h4 className="text-xs font-bold text-gray-700 mb-2">Prompt:</h4>
-                                                        <pre className="text-xs text-gray-600 overflow-x-auto font-mono mb-4 whitespace-pre-wrap">
-                                                            {log.prompt}
-                                                        </pre>
-                                                        <h4 className="text-xs font-bold text-gray-700 mb-2">Response:</h4>
-                                                        <pre className="text-xs text-gray-600 overflow-x-auto font-mono whitespace-pre-wrap">
-                                                            {log.raw_response}
+                                                        <pre className="text-xs text-gray-600 overflow-x-auto font-mono">
+                                                            {JSON.stringify(log.metrics, null, 2)}
                                                         </pre>
                                                     </div>
                                                 )}

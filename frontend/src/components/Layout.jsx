@@ -16,6 +16,9 @@ export default function Layout({ children }) {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const location = useLocation();
 
+    // Hide recruiter chrome on candidate-facing pages
+    const isPublicRoute = location.pathname.startsWith('/apply');
+
     const navigation = [
         { name: 'Jobs', href: '/', icon: ClipboardList },
         { name: 'Post Job', href: '/create-job', icon: Zap },
@@ -24,6 +27,11 @@ export default function Layout({ children }) {
         { name: 'System Learning', href: '/learning', icon: BarChart2 },
         { name: 'Admin', href: '/admin', icon: Settings },
     ];
+
+    // Clean layout for candidates
+    if (isPublicRoute) {
+        return <>{children}</>;
+    }
 
     return (
         <div className="min-h-screen bg-light-50 flex flex-col font-sans text-text-primary">

@@ -8,3 +8,4 @@ from .feedback import Feedback, SignalWeight
 from .audit import AuditLog
 from .snapshot import Snapshot, LLMLog, SignalWeightHistory
 from .outcome_template import OutcomeTemplate
+from .invite import Invite

@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
     Briefcase, MapPin, Building, IndianRupee, Clock,
-    CheckCircle, Plus, ArrowLeft, ChevronRight, Trash2
+    CheckCircle, Plus, ArrowLeft, ChevronRight, Trash2,
+    Send, Copy, ExternalLink, UserPlus, X, RefreshCw
 } from 'lucide-react';
-import { getJob, getJobOutcomes, deleteJob, finalizeShortlist, archiveJob } from '../api';
+import { getJob, getJobOutcomes, deleteJob, finalizeShortlist, archiveJob, createInvite, getJobInvites, deleteInvite } from '../api';
 
 export default function JobDetail() {
     const { jobId } = useParams();
@@ -12,16 +13,21 @@ export default function JobDetail() {
     const [job, setJob] = useState(null);
     const [outcomes, setOutcomes] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [invites, setInvites] = useState([]);
+    const [generatingInvite, setGeneratingInvite] = useState(false);
+    const [copiedToken, setCopiedToken] = useState(null);
 
     useEffect(() => {
         async function loadJob() {
             try {
-                const [jobData, outcomesData] = await Promise.all([
+                const [jobData, outcomesData, invitesData] = await Promise.all([
                     getJob(jobId),
-                    getJobOutcomes(jobId)
+                    getJobOutcomes(jobId),
+                    getJobInvites(jobId).catch(() => []),
                 ]);
                 setJob(jobData);
                 setOutcomes(outcomesData);
+                setInvites(invitesData);
             } catch (error) {
                 console.error("Failed to load job", error);
             } finally {
@@ -30,6 +36,40 @@ export default function JobDetail() {
         }
         loadJob();
     }, [jobId]);
+
+    const handleGenerateInvite = async () => {
+        setGeneratingInvite(true);
+        try {
+            const inv = await createInvite(jobId);
+            setInvites([inv, ...invites]);
+            // Auto-copy the new link
+            const url = `${window.location.origin}/apply/${inv.token}`;
+            navigator.clipboard.writeText(url);
+            setCopiedToken(inv.token);
+            setTimeout(() => setCopiedToken(null), 3000);
+        } catch (error) {
+            alert(`Failed to create invite: ${error.message}`);
+        } finally {
+            setGeneratingInvite(false);
+        }
+    };
+
+    const handleCopyLink = (token) => {
+        const url = `${window.location.origin}/apply/${token}`;
+        navigator.clipboard.writeText(url);
+        setCopiedToken(token);
+        setTimeout(() => setCopiedToken(null), 3000);
+    };
+
+    const handleRevokeInvite = async (inviteId) => {
+        if (!window.confirm('Revoke this invite? The link will stop working.')) return;
+        try {
+            await deleteInvite(inviteId);
+            setInvites(invites.filter(i => i.id !== inviteId));
+        } catch (error) {
+            alert(`Failed: ${error.message}`);
+        }
+    };
 
     const handleArchiveJob = async () => {
         const confirmed = window.confirm(
@@ -205,6 +245,103 @@ export default function JobDetail() {
                                 </div>
                             </Link>
                         ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Invite Candidates Section */}
+            <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                    <h2 className="text-2xl font-bold text-gray-900">Invite Candidates</h2>
+                    <button
+                        onClick={handleGenerateInvite}
+                        disabled={generatingInvite}
+                        className="btn btn-primary"
+                    >
+                        {generatingInvite ? (
+                            <><RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Generating…</>
+                        ) : (
+                            <><UserPlus className="w-4 h-4 mr-2" /> Generate Invite Link</>
+                        )}
+                    </button>
+                </div>
+
+                {invites.length === 0 ? (
+                    <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+                        <Send className="mx-auto h-12 w-12 text-gray-300" />
+                        <h3 className="mt-2 text-sm font-medium text-gray-900">No invites yet</h3>
+                        <p className="mt-1 text-sm text-gray-500">Generate a unique link to send to candidates.</p>
+                    </div>
+                ) : (
+                    <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+                        {invites.map((inv) => {
+                            const isExpired = inv.is_expired || (inv.expires_at && new Date(inv.expires_at) < new Date());
+                            const statusColor = inv.status === 'submitted' ? 'bg-green-100 text-green-700'
+                                : inv.status === 'evaluated' ? 'bg-blue-100 text-blue-700'
+                                : isExpired ? 'bg-red-100 text-red-700'
+                                : 'bg-amber-100 text-amber-700';
+                            const statusLabel = isExpired && inv.status === 'pending' ? 'Expired' : inv.status;
+
+                            return (
+                                <div key={inv.id} className="p-4 hover:bg-gray-50 transition-colors">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${statusColor}`}>
+                                                {statusLabel}
+                                            </span>
+                                            {inv.candidate_name ? (
+                                                <div>
+                                                    <span className="font-medium text-gray-900">{inv.candidate_name}</span>
+                                                    {inv.candidate_email && (
+                                                        <span className="text-gray-500 text-sm ml-2">{inv.candidate_email}</span>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span className="text-gray-500 text-sm font-mono truncate">…{inv.token?.slice(-8)}</span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                            <span className="text-xs text-gray-400">
+                                                {inv.created_at?.split('T')[0]}
+                                            </span>
+                                            {inv.status === 'pending' && !isExpired && (
+                                                <button
+                                                    onClick={() => handleCopyLink(inv.token)}
+                                                    className="p-1.5 rounded-md hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600"
+                                                    title="Copy invite link"
+                                                >
+                                                    {copiedToken === inv.token ? (
+                                                        <CheckCircle className="w-4 h-4 text-green-500" />
+                                                    ) : (
+                                                        <Copy className="w-4 h-4" />
+                                                    )}
+                                                </button>
+                                            )}
+                                            {inv.linkedin_url && (
+                                                <a href={inv.linkedin_url} target="_blank" rel="noopener noreferrer"
+                                                    className="p-1.5 rounded-md hover:bg-blue-50 text-blue-500"
+                                                    title="LinkedIn">
+                                                    <ExternalLink className="w-4 h-4" />
+                                                </a>
+                                            )}
+                                            <button
+                                                onClick={() => handleRevokeInvite(inv.id)}
+                                                className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                                                title="Revoke invite"
+                                            >
+                                                <X className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {inv.github_username && (
+                                        <div className="mt-2 text-xs text-gray-500 flex gap-4">
+                                            <span>GitHub: <strong>{inv.github_username}</strong></span>
+                                            {inv.resume_url && <a href={inv.resume_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">Resume</a>}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
                     </div>
                 )}
             </div>

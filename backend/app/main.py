@@ -81,6 +81,10 @@ app.include_router(outcome_templates.router)
 from app.routes import snapshot
 app.include_router(snapshot.router)
 
+# Invite routes
+from app.routes import invite
+app.include_router(invite.router)
+
 # Metrics endpoint
 from app.monitoring import get_all_metrics, get_prometheus_format
 from fastapi.responses import PlainTextResponse

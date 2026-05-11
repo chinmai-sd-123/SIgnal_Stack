@@ -330,3 +330,57 @@ export async function getAnalyticsMetrics() {
     if (!response.ok) throw new Error("Failed to fetch analytics metrics");
     return response.json();
 }
+
+// === INVITE API ===
+export async function createInvite(jobId) {
+    const response = await fetch(`${API_URL}/jobs/${jobId}/invites`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "Failed to create invite");
+    }
+    return response.json();
+}
+
+export async function getJobInvites(jobId) {
+    const response = await fetch(`${API_URL}/jobs/${jobId}/invites`);
+    if (!response.ok) throw new Error("Failed to fetch invites");
+    return response.json();
+}
+
+export async function getInviteByToken(token) {
+    const response = await fetch(`${API_URL}/invites/${token}`);
+    if (response.status === 410) throw new Error("EXPIRED");
+    if (response.status === 400) throw new Error("ALREADY_USED");
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "Invite not found");
+    }
+    return response.json();
+}
+
+export async function submitInvite(token, data) {
+    const response = await fetch(`${API_URL}/invites/${token}/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+    });
+    if (response.status === 410) throw new Error("EXPIRED");
+    if (response.status === 400) throw new Error("ALREADY_USED");
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "Failed to submit application");
+    }
+    return response.json();
+}
+
+export async function deleteInvite(inviteId) {
+    const response = await fetch(`${API_URL}/invites/${inviteId}`, {
+        method: "DELETE",
+    });
+    if (!response.ok) throw new Error("Failed to revoke invite");
+    return response.json();
+}
+

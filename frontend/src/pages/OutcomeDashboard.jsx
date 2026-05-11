@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Share2, Play, CheckCircle, Copy, Users, Clock, ArrowLeft } from 'lucide-react';
+import { Share2, Play, Users, Clock, ArrowLeft } from 'lucide-react';
 import { triggerEvaluation, getOutcome, getProofs } from '../api';
 
 export default function OutcomeDashboard() {
@@ -10,7 +10,6 @@ export default function OutcomeDashboard() {
     const [proofs, setProofs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [evaluating, setEvaluating] = useState(false);
-    const [copied, setCopied] = useState(false);
 
     useEffect(() => {
         async function loadData() {
@@ -30,13 +29,7 @@ export default function OutcomeDashboard() {
         loadData();
     }, [outcomeId]);
 
-    const candidateLink = `${window.location.origin}/submit-proof/${outcomeId}`;
 
-    const handleCopyLink = () => {
-        navigator.clipboard.writeText(candidateLink);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
 
     const handleEvaluate = async () => {
         setEvaluating(true);
@@ -173,30 +166,6 @@ export default function OutcomeDashboard() {
 
                 {/* Sidebar - Signals & Invite */}
                 <div className="space-y-8">
-                    {/* Invite Card */}
-                    <div className="card bg-gradient-to-br from-primary-soft to-purple-50 border-primary-soft">
-                        <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
-                            Invite Candidates
-                        </h3>
-                        <p className="text-sm text-gray-600 mb-4">
-                            Share this link to collect standardized proofs.
-                        </p>
-
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                readOnly
-                                value={candidateLink}
-                                className="input-field bg-white text-gray-500 text-xs"
-                            />
-                            <button
-                                onClick={handleCopyLink}
-                                className="btn btn-secondary px-3"
-                            >
-                                {copied ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                            </button>
-                        </div>
-                    </div>
 
                     {/* Signals Card */}
                     <div className="card">
