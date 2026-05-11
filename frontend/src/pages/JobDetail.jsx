@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
     Briefcase, MapPin, Building, IndianRupee, Clock,
     CheckCircle, Plus, ArrowLeft, ChevronRight, Trash2,
@@ -14,6 +14,7 @@ import {
 export default function JobDetail() {
     const { jobId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const [job, setJob] = useState(null);
     const [outcomes, setOutcomes] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -103,6 +104,11 @@ export default function JobDetail() {
             document.removeEventListener('visibilitychange', refreshWhenVisible);
         };
     }, [refreshEvaluationState]);
+
+    useEffect(() => {
+        if (loading || location.hash !== '#outcomes') return;
+        document.getElementById('outcomes')?.scrollIntoView({ block: 'start' });
+    }, [loading, location.hash, outcomes.length]);
 
     const handleGenerateInvite = async () => {
         setGeneratingInvite(true);
@@ -323,7 +329,7 @@ export default function JobDetail() {
             </div>
 
             {/* Outcomes Section */}
-            <div className="space-y-4">
+            <div id="outcomes" className="space-y-4 scroll-mt-6">
                 <div className="flex justify-between items-center">
                     <h2 className="text-2xl font-bold text-gray-900">Outcomes</h2>
                     <Link

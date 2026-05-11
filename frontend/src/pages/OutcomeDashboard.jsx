@@ -65,9 +65,11 @@ export default function OutcomeDashboard() {
 
     if (!outcome) return <div className="p-8 text-center text-gray-500">Outcome not found.</div>;
 
+    const backToOutcomesPath = outcome.job_id ? `/jobs/${outcome.job_id}#outcomes` : '/outcomes';
+
     return (
         <div className="max-w-6xl mx-auto space-y-8 px-4 sm:px-6 lg:px-8">
-            <button onClick={() => navigate('/outcomes')} className="text-gray-500 hover:text-primary flex items-center gap-1 transition-colors">
+            <button onClick={() => navigate(backToOutcomesPath)} className="text-gray-500 hover:text-primary flex items-center gap-1 transition-colors">
                 <ArrowLeft className="w-4 h-4" /> Back to Outcomes
             </button>
 
