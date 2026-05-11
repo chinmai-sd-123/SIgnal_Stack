@@ -369,6 +369,10 @@ export async function submitInvite(token, data) {
     });
     if (response.status === 410) throw new Error("EXPIRED");
     if (response.status === 400) throw new Error("ALREADY_USED");
+    if (response.status === 409) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "You have already submitted an application");
+    }
     if (!response.ok) {
         const error = await response.json().catch(() => ({}));
         throw new Error(error.detail || "Failed to submit application");

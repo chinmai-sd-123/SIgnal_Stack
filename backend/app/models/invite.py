@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer
 from sqlalchemy.orm import relationship
 from app.config.database import Base
 import datetime
@@ -7,9 +7,8 @@ import uuid
 
 class Invite(Base):
     """
-    A unique invite link for a candidate to apply to a specific job.
-    Token-based, no auth needed. Expires after 7 days.
-    Status flow: pending → submitted → evaluated
+    A reusable invite link for a job. Multiple candidates can submit through
+    the same link. Expires after 7 days. Recruiter can revoke at any time.
     """
     __tablename__ = "invites"
 
@@ -17,9 +16,32 @@ class Invite(Base):
     token = Column(String, unique=True, index=True, nullable=False, default=lambda: str(uuid.uuid4()))
     job_id = Column(String, ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    # Candidate info — filled on submission
-    candidate_name = Column(String, nullable=True)
-    candidate_email = Column(String, nullable=True)
+    # Status: active (accepting submissions) | revoked (manually disabled)
+    status = Column(String, default="active", nullable=False)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+    # Relationships
+    job = relationship("Job", backref="invites")
+    submissions = relationship("InviteSubmission", back_populates="invite", cascade="all, delete-orphan")
+
+
+class InviteSubmission(Base):
+    """
+    A single candidate's submission through an invite link.
+    Each submission captures all candidate-provided info.
+    """
+    __tablename__ = "invite_submissions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    invite_id = Column(String, ForeignKey("invites.id", ondelete="CASCADE"), nullable=False, index=True)
+    job_id = Column(String, ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Candidate info
+    candidate_name = Column(String, nullable=False)
+    candidate_email = Column(String, nullable=False)
     github_username = Column(String, nullable=True)
     repo_url = Column(String, nullable=True)
     linkedin_url = Column(String, nullable=True)
@@ -27,13 +49,11 @@ class Invite(Base):
     leetcode_username = Column(String, nullable=True)
     context = Column(Text, nullable=True)
 
-    # Status
-    status = Column(String, default="pending", nullable=False)  # pending | submitted | evaluated
+    # Status: submitted | evaluated
+    status = Column(String, default="submitted", nullable=False)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    expires_at = Column(DateTime, nullable=False)
-    submitted_at = Column(DateTime, nullable=True)
+    submitted_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     # Relationships
-    job = relationship("Job", backref="invites")
+    invite = relationship("Invite", back_populates="submissions")

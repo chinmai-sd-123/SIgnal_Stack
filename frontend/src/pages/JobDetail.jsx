@@ -274,38 +274,35 @@ export default function JobDetail() {
                         <p className="mt-1 text-sm text-gray-500">Generate a unique link to send to candidates.</p>
                     </div>
                 ) : (
-                    <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+                    <div className="space-y-4">
                         {invites.map((inv) => {
                             const isExpired = inv.is_expired || (inv.expires_at && new Date(inv.expires_at) < new Date());
-                            const statusColor = inv.status === 'submitted' ? 'bg-green-100 text-green-700'
-                                : inv.status === 'evaluated' ? 'bg-blue-100 text-blue-700'
+                            const statusColor = inv.status === 'active' && !isExpired ? 'bg-green-100 text-green-700'
                                 : isExpired ? 'bg-red-100 text-red-700'
-                                : 'bg-amber-100 text-amber-700';
-                            const statusLabel = isExpired && inv.status === 'pending' ? 'Expired' : inv.status;
+                                : 'bg-gray-100 text-gray-600';
+                            const statusLabel = isExpired ? 'Expired' : inv.status === 'active' ? 'Active' : inv.status;
+                            const subs = inv.submissions || [];
 
                             return (
-                                <div key={inv.id} className="p-4 hover:bg-gray-50 transition-colors">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-3 min-w-0">
+                                <div key={inv.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                                    {/* Invite header */}
+                                    <div className="p-4 flex items-center justify-between bg-gray-50 border-b border-gray-100">
+                                        <div className="flex items-center gap-3">
                                             <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${statusColor}`}>
                                                 {statusLabel}
                                             </span>
-                                            {inv.candidate_name ? (
-                                                <div>
-                                                    <span className="font-medium text-gray-900">{inv.candidate_name}</span>
-                                                    {inv.candidate_email && (
-                                                        <span className="text-gray-500 text-sm ml-2">{inv.candidate_email}</span>
-                                                    )}
-                                                </div>
-                                            ) : (
-                                                <span className="text-gray-500 text-sm font-mono truncate">…{inv.token?.slice(-8)}</span>
+                                            <span className="text-gray-500 text-sm font-mono">…{inv.token?.slice(-8)}</span>
+                                            {subs.length > 0 && (
+                                                <span className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                                                    {subs.length} {subs.length === 1 ? 'submission' : 'submissions'}
+                                                </span>
                                             )}
                                         </div>
-                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                        <div className="flex items-center gap-2">
                                             <span className="text-xs text-gray-400">
                                                 {inv.created_at?.split('T')[0]}
                                             </span>
-                                            {inv.status === 'pending' && !isExpired && (
+                                            {inv.status === 'active' && !isExpired && (
                                                 <button
                                                     onClick={() => handleCopyLink(inv.token)}
                                                     className="p-1.5 rounded-md hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600"
@@ -318,13 +315,6 @@ export default function JobDetail() {
                                                     )}
                                                 </button>
                                             )}
-                                            {inv.linkedin_url && (
-                                                <a href={inv.linkedin_url} target="_blank" rel="noopener noreferrer"
-                                                    className="p-1.5 rounded-md hover:bg-blue-50 text-blue-500"
-                                                    title="LinkedIn">
-                                                    <ExternalLink className="w-4 h-4" />
-                                                </a>
-                                            )}
                                             <button
                                                 onClick={() => handleRevokeInvite(inv.id)}
                                                 className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
@@ -334,58 +324,76 @@ export default function JobDetail() {
                                             </button>
                                         </div>
                                     </div>
-                                    {inv.status === 'submitted' && (
-                                        <div className="mt-3 p-4 bg-gray-50 rounded-lg border border-gray-100 space-y-3">
-                                            {/* Candidate links row */}
-                                            <div className="flex flex-wrap gap-3">
-                                                {inv.github_username && (
-                                                    <a href={`https://github.com/${inv.github_username}`} target="_blank" rel="noopener noreferrer"
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-700 transition-colors">
-                                                        <Github className="w-3.5 h-3.5" /> {inv.github_username}
-                                                    </a>
-                                                )}
-                                                {inv.linkedin_url && (
-                                                    <a href={inv.linkedin_url} target="_blank" rel="noopener noreferrer"
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
-                                                        <Linkedin className="w-3.5 h-3.5" /> LinkedIn Profile
-                                                    </a>
-                                                )}
-                                                {inv.resume_url && (
-                                                    <a href={inv.resume_url} target="_blank" rel="noopener noreferrer"
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 transition-colors">
-                                                        <FileText className="w-3.5 h-3.5" /> Resume
-                                                    </a>
-                                                )}
-                                            </div>
-                                            {/* Repo & LeetCode */}
-                                            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-600">
-                                                {inv.repo_url && (
-                                                    <a href={inv.repo_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-600 hover:underline">
-                                                        <Code className="w-3 h-3" /> {inv.repo_url.replace('https://github.com/', '')}
-                                                    </a>
-                                                )}
-                                                {inv.leetcode_username && (
-                                                    <span className="flex items-center gap-1">
-                                                        <Code className="w-3 h-3 text-amber-500" /> LeetCode: <strong>{inv.leetcode_username}</strong>
-                                                    </span>
-                                                )}
-                                                {inv.submitted_at && (
-                                                    <span className="text-gray-400">Submitted {new Date(inv.submitted_at).toLocaleDateString()}</span>
-                                                )}
-                                            </div>
-                                            {/* Context notes */}
-                                            {inv.context && (
-                                                <div className="text-xs text-gray-600 bg-white p-3 rounded-md border border-gray-100">
-                                                    <span className="font-semibold text-gray-700">Notes:</span> {inv.context}
-                                                </div>
-                                            )}
+
+                                    {/* Submissions list */}
+                                    {subs.length === 0 ? (
+                                        <div className="p-4 text-sm text-gray-400 text-center">
+                                            No submissions yet — share this link with candidates
                                         </div>
-                                    )}
-                                    {/* Minimal info for non-submitted */}
-                                    {inv.status !== 'submitted' && inv.github_username && (
-                                        <div className="mt-2 text-xs text-gray-500 flex gap-4">
-                                            <span>GitHub: <strong>{inv.github_username}</strong></span>
-                                            {inv.resume_url && <a href={inv.resume_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">Resume</a>}
+                                    ) : (
+                                        <div className="divide-y divide-gray-100">
+                                            {subs.map((sub) => (
+                                                <div key={sub.id} className="p-4 hover:bg-gray-50 transition-colors">
+                                                    {/* Candidate header */}
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-sm font-bold">
+                                                                {sub.candidate_name?.charAt(0)?.toUpperCase() || '?'}
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-medium text-gray-900">{sub.candidate_name}</span>
+                                                                <span className="text-gray-500 text-sm ml-2">{sub.candidate_email}</span>
+                                                            </div>
+                                                        </div>
+                                                        <span className="text-xs text-gray-400">
+                                                            {sub.submitted_at && new Date(sub.submitted_at).toLocaleDateString()}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Action buttons */}
+                                                    <div className="flex flex-wrap gap-2 mb-2">
+                                                        {sub.github_username && (
+                                                            <a href={`https://github.com/${sub.github_username}`} target="_blank" rel="noopener noreferrer"
+                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-700 transition-colors">
+                                                                <Github className="w-3.5 h-3.5" /> {sub.github_username}
+                                                            </a>
+                                                        )}
+                                                        {sub.linkedin_url && (
+                                                            <a href={sub.linkedin_url} target="_blank" rel="noopener noreferrer"
+                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors">
+                                                                <Linkedin className="w-3.5 h-3.5" /> LinkedIn
+                                                            </a>
+                                                        )}
+                                                        {sub.resume_url && (
+                                                            <a href={sub.resume_url} target="_blank" rel="noopener noreferrer"
+                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+                                                                <FileText className="w-3.5 h-3.5" /> Resume
+                                                            </a>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Details row */}
+                                                    <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
+                                                        {sub.repo_url && (
+                                                            <a href={sub.repo_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-600 hover:underline">
+                                                                <Code className="w-3 h-3" /> {sub.repo_url.replace('https://github.com/', '')}
+                                                            </a>
+                                                        )}
+                                                        {sub.leetcode_username && (
+                                                            <span className="flex items-center gap-1">
+                                                                <Code className="w-3 h-3 text-amber-500" /> LeetCode: <strong>{sub.leetcode_username}</strong>
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Context */}
+                                                    {sub.context && (
+                                                        <div className="mt-2 text-xs text-gray-600 bg-gray-50 p-3 rounded-md border border-gray-100">
+                                                            <span className="font-semibold text-gray-700">Notes:</span> {sub.context}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
                                         </div>
                                     )}
                                 </div>

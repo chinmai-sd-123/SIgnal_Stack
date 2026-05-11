@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import uuid
 
 from app.config.database import get_db
-from app.models.invite import Invite
+from app.models.invite import Invite, InviteSubmission
 from app.models.job import Job
 
 router = APIRouter(tags=["Invites"])
@@ -16,7 +16,7 @@ INVITE_EXPIRY_DAYS = 7
 
 @router.post("/jobs/{job_id}/invites")
 def create_invite(job_id: str, db: Session = Depends(get_db)):
-    """Generate a new invite link for a job."""
+    """Generate a reusable invite link for a job. Multiple candidates can use it."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -25,6 +25,7 @@ def create_invite(job_id: str, db: Session = Depends(get_db)):
         id=str(uuid.uuid4()),
         token=str(uuid.uuid4()),
         job_id=job_id,
+        status="active",
         expires_at=datetime.utcnow() + timedelta(days=INVITE_EXPIRY_DAYS),
     )
     db.add(invite)
@@ -38,43 +39,57 @@ def create_invite(job_id: str, db: Session = Depends(get_db)):
         "status": invite.status,
         "expires_at": invite.expires_at.isoformat(),
         "created_at": invite.created_at.isoformat(),
+        "submission_count": 0,
     }
 
 
 @router.get("/jobs/{job_id}/invites")
 def list_invites(job_id: str, db: Session = Depends(get_db)):
-    """List all invites for a job (recruiter view)."""
+    """List all invites for a job with their submissions (recruiter view)."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
     invites = db.query(Invite).filter(Invite.job_id == job_id).order_by(Invite.created_at.desc()).all()
 
-    return [
-        {
+    result = []
+    for inv in invites:
+        submissions = db.query(InviteSubmission).filter(
+            InviteSubmission.invite_id == inv.id
+        ).order_by(InviteSubmission.submitted_at.desc()).all()
+
+        result.append({
             "id": inv.id,
             "token": inv.token,
             "status": inv.status,
-            "candidate_name": inv.candidate_name,
-            "candidate_email": inv.candidate_email,
-            "github_username": inv.github_username,
-            "linkedin_url": inv.linkedin_url,
-            "resume_url": inv.resume_url,
-            "repo_url": inv.repo_url,
-            "leetcode_username": inv.leetcode_username,
-            "context": inv.context,
             "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
             "created_at": inv.created_at.isoformat() if inv.created_at else None,
-            "submitted_at": inv.submitted_at.isoformat() if inv.submitted_at else None,
             "is_expired": inv.expires_at < datetime.utcnow() if inv.expires_at else False,
-        }
-        for inv in invites
-    ]
+            "submission_count": len(submissions),
+            "submissions": [
+                {
+                    "id": sub.id,
+                    "candidate_name": sub.candidate_name,
+                    "candidate_email": sub.candidate_email,
+                    "github_username": sub.github_username,
+                    "repo_url": sub.repo_url,
+                    "linkedin_url": sub.linkedin_url,
+                    "resume_url": sub.resume_url,
+                    "leetcode_username": sub.leetcode_username,
+                    "context": sub.context,
+                    "status": sub.status,
+                    "submitted_at": sub.submitted_at.isoformat() if sub.submitted_at else None,
+                }
+                for sub in submissions
+            ],
+        })
+
+    return result
 
 
 @router.delete("/invites/{invite_id}")
 def revoke_invite(invite_id: str, db: Session = Depends(get_db)):
-    """Revoke/delete an invite."""
+    """Revoke/delete an invite and all its submissions."""
     invite = db.query(Invite).filter(Invite.id == invite_id).first()
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
@@ -96,8 +111,8 @@ def get_invite(token: str, db: Session = Depends(get_db)):
     if invite.expires_at < datetime.utcnow():
         raise HTTPException(status_code=410, detail="This invite link has expired")
 
-    if invite.status != "pending":
-        raise HTTPException(status_code=400, detail="This invite has already been used")
+    if invite.status != "active":
+        raise HTTPException(status_code=400, detail="This invite link is no longer accepting submissions")
 
     job = db.query(Job).filter(Job.id == invite.job_id).first()
     if not job:
@@ -132,7 +147,7 @@ def get_invite(token: str, db: Session = Depends(get_db)):
 
 @router.post("/invites/{token}/submit")
 def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
-    """Candidate submits their proof via the invite link."""
+    """Candidate submits their application via the invite link. Link stays reusable."""
     invite = db.query(Invite).filter(Invite.token == token).first()
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
@@ -140,32 +155,42 @@ def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
     if invite.expires_at < datetime.utcnow():
         raise HTTPException(status_code=410, detail="This invite link has expired")
 
-    if invite.status != "pending":
-        raise HTTPException(status_code=400, detail="This invite has already been used")
+    if invite.status != "active":
+        raise HTTPException(status_code=400, detail="This invite link is no longer accepting submissions")
 
-    # Save candidate info
-    invite.candidate_name = data.get("candidate_name", "")
-    invite.candidate_email = data.get("candidate_email", "")
-    invite.github_username = data.get("github_username", "")
-    invite.repo_url = data.get("repo_url", "")
-    invite.linkedin_url = data.get("linkedin_url", "")
-    invite.resume_url = data.get("resume_url", "")
-    invite.leetcode_username = data.get("leetcode_username", "")
-    invite.context = data.get("context", "")
-    invite.status = "submitted"
-    invite.submitted_at = datetime.utcnow()
+    # Check for duplicate email on same invite
+    candidate_email = data.get("candidate_email", "").strip()
+    if candidate_email:
+        existing = db.query(InviteSubmission).filter(
+            InviteSubmission.invite_id == invite.id,
+            InviteSubmission.candidate_email == candidate_email,
+        ).first()
+        if existing:
+            raise HTTPException(status_code=409, detail="You have already submitted an application with this email")
 
+    # Create submission record
+    submission = InviteSubmission(
+        id=str(uuid.uuid4()),
+        invite_id=invite.id,
+        job_id=invite.job_id,
+        candidate_name=data.get("candidate_name", ""),
+        candidate_email=candidate_email,
+        github_username=data.get("github_username", ""),
+        repo_url=data.get("repo_url", ""),
+        linkedin_url=data.get("linkedin_url", ""),
+        resume_url=data.get("resume_url", ""),
+        leetcode_username=data.get("leetcode_username", ""),
+        context=data.get("context", ""),
+    )
+    db.add(submission)
     db.commit()
-    db.refresh(invite)
+    db.refresh(submission)
 
     # Trigger evaluation pipeline if repo_url is provided
-    if invite.repo_url:
+    if submission.repo_url:
         try:
-            from app.services.worker_queue import worker_queue
+            candidate_id = submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
 
-            candidate_id = invite.github_username or invite.candidate_email or f"invite_{invite.id[:8]}"
-
-            # Submit proof through the existing pipeline
             from app.pipeline.proof import ProofPipeline
             pipeline = ProofPipeline(db)
             pipeline.submit_proof(
@@ -173,17 +198,16 @@ def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
                 candidate_id=candidate_id,
                 proof_type="github",
                 payload={
-                    "repo_url": invite.repo_url,
-                    "leetcode_username": invite.leetcode_username,
-                    "context": invite.context,
+                    "repo_url": submission.repo_url,
+                    "leetcode_username": submission.leetcode_username,
+                    "context": submission.context,
                 },
             )
         except Exception as e:
-            # Don't fail the submission if pipeline has issues
-            print(f"[WARN] Evaluation pipeline error for invite {invite.id}: {e}")
+            print(f"[WARN] Evaluation pipeline error for submission {submission.id}: {e}")
 
     return {
         "message": "Application submitted successfully",
-        "invite_id": invite.id,
-        "status": invite.status,
+        "submission_id": submission.id,
+        "status": submission.status,
     }

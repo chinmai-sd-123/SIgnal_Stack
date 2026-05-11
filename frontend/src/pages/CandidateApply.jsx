@@ -117,7 +117,8 @@ export default function CandidateApply() {
             setSubmitted(true);
         } catch (err) {
             if (err.message === 'EXPIRED') setError('expired');
-            else if (err.message === 'ALREADY_USED') setError('used');
+            else if (err.message === 'ALREADY_USED') setError('closed');
+            else if (err.message.includes('already submitted')) setError('duplicate');
             else alert(`Error: ${err.message}`);
         } finally {
             setSubmitting(false);
@@ -145,10 +146,16 @@ export default function CandidateApply() {
                 message: 'This invite link has expired. Please contact the recruiter for a new link.',
                 bg: 'bg-amber-50',
             },
-            used: {
+            closed: {
+                icon: <AlertTriangle className="w-16 h-16 text-orange-400" />,
+                title: 'Applications Closed',
+                message: 'This invite link is no longer accepting applications.',
+                bg: 'bg-orange-50',
+            },
+            duplicate: {
                 icon: <CheckCircle className="w-16 h-16 text-blue-400" />,
-                title: 'Already Submitted',
-                message: 'This invite has already been used to submit an application.',
+                title: 'Already Applied',
+                message: 'You have already submitted an application with this email address.',
                 bg: 'bg-blue-50',
             },
             not_found: {
@@ -287,32 +294,33 @@ export default function CandidateApply() {
                             </div>
                         </div>
 
-                        {/* LinkedIn & Resume */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    <span className="flex items-center gap-1.5"><Linkedin className="w-4 h-4 text-blue-600" /> LinkedIn URL</span>
-                                </label>
-                                <input
-                                    type="url"
-                                    placeholder="https://linkedin.com/in/johndoe"
-                                    value={formData.linkedin_url}
-                                    onChange={(e) => setFormData({ ...formData, linkedin_url: e.target.value })}
-                                    className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    <span className="flex items-center gap-1.5"><Link2 className="w-4 h-4 text-gray-500" /> Resume Link</span>
-                                </label>
-                                <input
-                                    type="url"
-                                    placeholder="https://drive.google.com/..."
-                                    value={formData.resume_url}
-                                    onChange={(e) => setFormData({ ...formData, resume_url: e.target.value })}
-                                    className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                                />
-                            </div>
+                        {/* Resume — Prominent Section */}
+                        <div className="p-5 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-100">
+                            <label className="block text-sm font-semibold text-gray-800 mb-2">
+                                <span className="flex items-center gap-1.5"><FileText className="w-4 h-4 text-indigo-600" /> Resume / CV Link</span>
+                            </label>
+                            <input
+                                type="url"
+                                placeholder="https://drive.google.com/file/d/... or Dropbox/OneDrive link"
+                                value={formData.resume_url}
+                                onChange={(e) => setFormData({ ...formData, resume_url: e.target.value })}
+                                className="w-full px-4 py-2.5 rounded-lg border border-indigo-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all bg-white"
+                            />
+                            <p className="mt-1.5 text-xs text-gray-500">Upload your resume to Google Drive, Dropbox, or OneDrive and paste the share link here. Ensure view access is enabled.</p>
+                        </div>
+
+                        {/* LinkedIn */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                <span className="flex items-center gap-1.5"><Linkedin className="w-4 h-4 text-blue-600" /> LinkedIn URL</span>
+                            </label>
+                            <input
+                                type="url"
+                                placeholder="https://linkedin.com/in/johndoe"
+                                value={formData.linkedin_url}
+                                onChange={(e) => setFormData({ ...formData, linkedin_url: e.target.value })}
+                                className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                            />
                         </div>
 
                         {/* GitHub section */}
