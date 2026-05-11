@@ -1,4 +1,6 @@
 import logging
+import json
+import threading
 import uuid
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
@@ -15,6 +17,7 @@ from app.pipeline.evaluator import Evaluator
 from app.pipeline.scoring_engine import score_candidate
 from app.pipeline.signal_extractor import SignalExtractor
 from app.services import crud
+from app.services.cache import cache
 from app.services.worker_queue import worker_queue
 from app.utils.time_utils import utc_now
 
@@ -23,6 +26,134 @@ logger = logging.getLogger(__name__)
 QUEUED_STATUSES = {"submitted", "queued", "failed"}
 ACTIVE_STATUSES = {"queued", "evaluating"}
 TERMINAL_EVALUATED_STATUSES = {"evaluated", "shortlisted", "rejected"}
+
+REDIS_JOB_EVAL_QUEUE = "signalstack:job_evaluations:queue"
+REDIS_JOB_EVAL_PROCESSING = "signalstack:job_evaluations:processing"
+REDIS_JOB_EVAL_TASK_PREFIX = "signalstack:job_evaluations:task"
+
+_redis_worker_thread: Optional[threading.Thread] = None
+_redis_worker_running = False
+_redis_worker_lock = threading.Lock()
+
+
+def _redis_task_key(task_id: str) -> str:
+    return f"{REDIS_JOB_EVAL_TASK_PREFIX}:{task_id}"
+
+
+def _redis_available() -> bool:
+    return bool(cache.redis_client)
+
+
+def _set_redis_task_status(task_id: str, status: str, **extra):
+    if not _redis_available():
+        return
+    payload = {
+        "task_id": task_id,
+        "status": status,
+        **extra,
+        "updated_at": utc_now().isoformat(),
+    }
+    try:
+        cache.redis_client.setex(_redis_task_key(task_id), 86400, json.dumps(payload, default=str))
+    except Exception as exc:
+        logger.warning("Could not update Redis evaluation task status: %s", exc)
+
+
+def _recover_redis_processing_queue():
+    """Move tasks left in processing by a crashed worker back to pending."""
+    if not _redis_available():
+        return
+    try:
+        while True:
+            item = cache.redis_client.rpop(REDIS_JOB_EVAL_PROCESSING)
+            if not item:
+                break
+            cache.redis_client.lpush(REDIS_JOB_EVAL_QUEUE, item)
+    except Exception as exc:
+        logger.warning("Could not recover Redis evaluation queue: %s", exc)
+
+
+def _redis_job_evaluation_worker_loop():
+    logger.info("Redis job evaluation worker started")
+    _recover_redis_processing_queue()
+
+    while _redis_worker_running:
+        try:
+            item = cache.redis_client.brpoplpush(
+                REDIS_JOB_EVAL_QUEUE,
+                REDIS_JOB_EVAL_PROCESSING,
+                timeout=2,
+            )
+            if not item:
+                continue
+
+            try:
+                payload = json.loads(item)
+                task_id = payload["task_id"]
+                _set_redis_task_status(task_id, "running", job_id=payload.get("job_id"))
+                result = evaluate_job_applications_sync(
+                    payload["job_id"],
+                    deep_limit=payload.get("deep_limit", 100),
+                    candidate_limit=payload.get("candidate_limit"),
+                    include_deep_evaluation=payload.get("include_deep_evaluation", True),
+                )
+                _set_redis_task_status(task_id, "completed", job_id=payload.get("job_id"), result=result)
+            except Exception as exc:
+                logger.exception("Redis job evaluation task failed")
+                try:
+                    task_id = json.loads(item).get("task_id")
+                    if task_id:
+                        _set_redis_task_status(task_id, "failed", error=str(exc))
+                except Exception:
+                    pass
+            finally:
+                cache.redis_client.lrem(REDIS_JOB_EVAL_PROCESSING, 1, item)
+        except Exception as exc:
+            logger.warning("Redis job evaluation worker error: %s", exc)
+
+    logger.info("Redis job evaluation worker stopped")
+
+
+def init_redis_job_evaluation_worker():
+    """Start Redis-backed job evaluation worker when Redis is configured."""
+    global _redis_worker_thread, _redis_worker_running
+    if not _redis_available():
+        return False
+
+    with _redis_worker_lock:
+        if _redis_worker_running and _redis_worker_thread and _redis_worker_thread.is_alive():
+            return True
+
+        _redis_worker_running = True
+        _redis_worker_thread = threading.Thread(
+            target=_redis_job_evaluation_worker_loop,
+            name="redis-job-evaluation-worker",
+            daemon=True,
+        )
+        _redis_worker_thread.start()
+        return True
+
+
+def stop_redis_job_evaluation_worker(timeout: float = 5.0):
+    global _redis_worker_running
+    _redis_worker_running = False
+    if _redis_worker_thread and _redis_worker_thread.is_alive():
+        _redis_worker_thread.join(timeout=timeout)
+
+
+def get_job_evaluation_queue_backend() -> str:
+    return "redis" if _redis_available() else "memory"
+
+
+def get_job_evaluation_queue_size() -> int:
+    size = worker_queue.get_queue_size()
+    if _redis_available():
+        try:
+            size += int(cache.redis_client.llen(REDIS_JOB_EVAL_QUEUE) or 0)
+            size += int(cache.redis_client.llen(REDIS_JOB_EVAL_PROCESSING) or 0)
+        except Exception as exc:
+            logger.warning("Could not read Redis evaluation queue size: %s", exc)
+    return size
 
 
 def candidate_id_for_submission(submission: InviteSubmission) -> str:
@@ -352,6 +483,21 @@ def queue_job_evaluation(
     candidate_limit: Optional[int] = None,
     include_deep_evaluation: bool = True,
 ) -> str:
+    if _redis_available():
+        init_redis_job_evaluation_worker()
+        task_id = str(uuid.uuid4())[:8]
+        payload = {
+            "task_id": task_id,
+            "job_id": job_id,
+            "deep_limit": deep_limit,
+            "candidate_limit": candidate_limit,
+            "include_deep_evaluation": include_deep_evaluation,
+            "created_at": utc_now().isoformat(),
+        }
+        _set_redis_task_status(task_id, "pending", job_id=job_id)
+        cache.redis_client.lpush(REDIS_JOB_EVAL_QUEUE, json.dumps(payload))
+        return task_id
+
     return worker_queue.enqueue(
         evaluate_job_applications_sync,
         job_id,
@@ -442,5 +588,6 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
             }
             for c in evaluated[:20]
         ],
-        "queue_size": worker_queue.get_queue_size(),
+        "queue_size": get_job_evaluation_queue_size(),
+        "queue_backend": get_job_evaluation_queue_backend(),
     }

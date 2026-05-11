@@ -25,6 +25,13 @@ async def lifespan(app: FastAPI):
     # Initialize cache
     from app.services.cache import cache
     print(f"Cache initialized: {'Redis' if cache.redis_client else 'In-memory'}")
+
+    # Start durable Redis-backed job evaluation worker when Redis is available.
+    from app.services.bulk_evaluation_service import init_redis_job_evaluation_worker
+    if init_redis_job_evaluation_worker():
+        print("Job evaluation queue initialized: Redis")
+    else:
+        print("Job evaluation queue initialized: in-memory")
     
     print("[+] SignalStack API ready!")
     
@@ -32,6 +39,8 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     print("[-] Shutting down SignalStack API...")
+    from app.services.bulk_evaluation_service import stop_redis_job_evaluation_worker
+    stop_redis_job_evaluation_worker(timeout=5)
     from app.services.worker_queue import worker_queue
     worker_queue.stop(wait=True, timeout=5)
     print("[!] Goodbye!")
