@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import ServerWakeupBanner from './ServerWakeupBanner';
 import { Link, useLocation } from 'react-router-dom';
 import {
     ClipboardList,
@@ -109,6 +110,9 @@ export default function Layout({ children }) {
                     </div>
                 </div>
             </nav>
+
+            {/* Backend Wakeup Banner */}
+            <ServerWakeupBanner />
 
             {/* Main Content */}
             <main className="flex-1 max-w-7xl w-full mx-auto py-8 px-4 sm:px-6 lg:px-8">
