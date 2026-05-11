@@ -226,6 +226,26 @@ def mark_evaluation_complete(db: Session, job_id: str, decision_metrics: dict):
         data['decision'] = decision_metrics # Store what we decided
         db_eval.evaluation_json = data
         db.add(db_eval) # Flag as modified
+
+        # Sync status to InviteSubmissions
+        selected = set(decision_metrics.get("selected_candidates", []))
+        if decision_metrics.get("selected_candidate"):
+            selected.add(decision_metrics["selected_candidate"])
+        rejected = set(decision_metrics.get("rejected_candidates", []))
+        
+        # Get proofs for this outcome to map candidate_id to invite_submission_id
+        proofs = db.query(models.Proof).filter(models.Proof.outcome_id == job_id).all()
+        for proof in proofs:
+            sub_id = proof.payload_json.get("invite_submission_id") if proof.payload_json else None
+            if sub_id:
+                sub = db.query(models.InviteSubmission).filter(models.InviteSubmission.id == sub_id).first()
+                if sub:
+                    if proof.candidate_id in selected:
+                        sub.status = "hired"
+                    elif proof.candidate_id in rejected or decision_metrics.get("action_taken") == "reject_all":
+                        sub.status = "rejected"
+                    db.add(sub)
+
         db.commit()
         db.refresh(db_eval)
         return db_eval
@@ -243,6 +263,17 @@ def reset_evaluation_decision(db: Session, job_id: str):
         data['decision'] = None  # Clear the decision
         db_eval.evaluation_json = data
         db.add(db_eval)
+
+        # Reset InviteSubmissions status
+        proofs = db.query(models.Proof).filter(models.Proof.outcome_id == job_id).all()
+        for proof in proofs:
+            sub_id = proof.payload_json.get("invite_submission_id") if proof.payload_json else None
+            if sub_id:
+                sub = db.query(models.InviteSubmission).filter(models.InviteSubmission.id == sub_id).first()
+                if sub:
+                    sub.status = "submitted" # or "evaluated"
+                    db.add(sub)
+
         db.commit()
         db.refresh(db_eval)
         return db_eval

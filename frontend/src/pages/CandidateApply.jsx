@@ -95,7 +95,7 @@ export default function CandidateApply() {
 
     // ─── Loading ────────────────────────────────────────
     if (loading) return (
-        <div className="min-h-screen flex items-center justify-center" style={{background:'linear-gradient(180deg,#f7f5f0,#f2eee6)'}}>
+        <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(180deg,#f7f5f0,#f2eee6)' }}>
             <div className="text-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0b5f66] mx-auto"></div>
                 <p className="mt-4 text-[#475569] font-['Sora']">Loading invite…</p>
@@ -106,15 +106,15 @@ export default function CandidateApply() {
     // ─── Error states ───────────────────────────────────
     if (error) {
         const cfg = {
-            expired:   { icon: <Clock className="w-14 h-14 text-[#c9a227]" />, title: 'Invite Expired', msg: 'This invite link has expired. Please contact the recruiter for a new link.', accent: '#c9a227' },
-            closed:    { icon: <AlertTriangle className="w-14 h-14 text-[#c9a227]" />, title: 'Applications Closed', msg: 'This invite link is no longer accepting applications.', accent: '#c9a227' },
+            expired: { icon: <Clock className="w-14 h-14 text-[#c9a227]" />, title: 'Invite Expired', msg: 'This invite link has expired. Please contact the recruiter for a new link.', accent: '#c9a227' },
+            closed: { icon: <AlertTriangle className="w-14 h-14 text-[#c9a227]" />, title: 'Applications Closed', msg: 'This invite link is no longer accepting applications.', accent: '#c9a227' },
             duplicate: { icon: <CheckCircle className="w-14 h-14 text-[#0b5f66]" />, title: 'Already Applied', msg: 'You have already submitted an application with this email address.', accent: '#0b5f66' },
             not_found: { icon: <AlertTriangle className="w-14 h-14 text-red-400" />, title: 'Invite Not Found', msg: 'This invite link is invalid. Please check the URL or contact the recruiter.', accent: '#EF4444' },
         }[error] || { icon: <AlertTriangle className="w-14 h-14 text-red-400" />, title: 'Error', msg: 'Something went wrong.', accent: '#EF4444' };
 
         return (
-            <div className="min-h-screen flex items-center justify-center px-4" style={{background:'linear-gradient(180deg,#f7f5f0,#f2eee6)'}}>
-                <div className="max-w-md w-full rounded-2xl p-10 text-center border border-[#e6e1d7]" style={{background:'rgba(255,253,248,0.92)',boxShadow:'0 10px 30px rgba(15,23,42,0.08)'}}>
+            <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'linear-gradient(180deg,#f7f5f0,#f2eee6)' }}>
+                <div className="max-w-md w-full rounded-2xl p-10 text-center border border-[#e6e1d7]" style={{ background: 'rgba(255,253,248,0.92)', boxShadow: '0 10px 30px rgba(15,23,42,0.08)' }}>
                     <div className="mx-auto mb-5">{cfg.icon}</div>
                     <h1 className="text-2xl font-bold text-[#0f172a] mb-3 font-['Sora']">{cfg.title}</h1>
                     <p className="text-[#475569]">{cfg.msg}</p>
@@ -125,9 +125,9 @@ export default function CandidateApply() {
 
     // ─── Success ────────────────────────────────────────
     if (submitted) return (
-        <div className="min-h-screen flex items-center justify-center px-4" style={{background:'linear-gradient(180deg,#f7f5f0,#f2eee6)'}}>
-            <div className="max-w-md w-full rounded-2xl p-10 text-center border border-[#e6e1d7]" style={{background:'rgba(255,253,248,0.92)',boxShadow:'0 18px 44px rgba(15,23,42,0.14)'}}>
-                <div className="rounded-full h-20 w-20 flex items-center justify-center mx-auto mb-6" style={{background:'rgba(11,95,102,0.1)'}}>
+        <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'linear-gradient(180deg,#f7f5f0,#f2eee6)' }}>
+            <div className="max-w-md w-full rounded-2xl p-10 text-center border border-[#e6e1d7]" style={{ background: 'rgba(255,253,248,0.92)', boxShadow: '0 18px 44px rgba(15,23,42,0.14)' }}>
+                <div className="rounded-full h-20 w-20 flex items-center justify-center mx-auto mb-6" style={{ background: 'rgba(11,95,102,0.1)' }}>
                     <CheckCircle className="h-10 w-10 text-[#0b5f66]" />
                 </div>
                 <h1 className="text-2xl font-bold text-[#0f172a] mb-3 font-['Sora']">Application Submitted!</h1>
@@ -149,11 +149,11 @@ export default function CandidateApply() {
         }}>
             <div className="max-w-3xl mx-auto">
                 {/* Card */}
-                <div className="rounded-2xl overflow-hidden border border-[#e6e1d7]" style={{background:'rgba(255,253,248,0.92)',backdropFilter:'blur(20px)',boxShadow:'0 10px 30px rgba(15,23,42,0.08)'}}>
+                <div className="rounded-2xl overflow-hidden border border-[#e6e1d7]" style={{ background: 'rgba(255,253,248,0.92)', backdropFilter: 'blur(20px)', boxShadow: '0 10px 30px rgba(15,23,42,0.08)' }}>
 
                     {/* Hero Header */}
-                    <div className="px-8 py-10 text-white relative overflow-hidden" style={{background:'linear-gradient(135deg, #0b5f66 0%, #0f766e 50%, #c9a227 110%)'}}>
-                        <div className="absolute top-[-50%] left-[-50%] w-[200%] h-[200%] pointer-events-none" style={{background:'radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%)',animation:'float 6s ease-in-out infinite'}}></div>
+                    <div className="px-8 py-10 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #0b5f66 0%, #0f766e 50%, #c9a227 110%)' }}>
+                        <div className="absolute top-[-50%] left-[-50%] w-[200%] h-[200%] pointer-events-none" style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%)', animation: 'float 6s ease-in-out infinite' }}></div>
                         <div className="relative z-10">
                             <div className="flex items-center gap-2 text-white/70 text-sm mb-2">
                                 <Briefcase className="w-4 h-4" />
@@ -170,7 +170,7 @@ export default function CandidateApply() {
 
                     {/* Job description */}
                     {job?.description && (
-                        <div className="px-8 py-5 border-b border-[#e6e1d7]" style={{background:'rgba(247,245,240,0.5)'}}>
+                        <div className="px-8 py-5 border-b border-[#e6e1d7]" style={{ background: 'rgba(247,245,240,0.5)' }}>
                             <p className="text-sm text-[#475569] whitespace-pre-line">{job.description}</p>
                         </div>
                     )}
@@ -195,7 +195,7 @@ export default function CandidateApply() {
 
                     {/* Form */}
                     <form onSubmit={handleSubmit} className="px-8 py-8 space-y-6">
-                        <div className="p-4 rounded-xl border border-[rgba(11,95,102,0.2)]" style={{background:'linear-gradient(135deg, rgba(11,95,102,0.08) 0%, rgba(201,162,39,0.06) 100%)'}}>
+                        <div className="p-4 rounded-xl border border-[rgba(11,95,102,0.2)]" style={{ background: 'linear-gradient(135deg, rgba(11,95,102,0.08) 0%, rgba(201,162,39,0.06) 100%)' }}>
                             <p className="text-sm text-[#0b5f66]"><strong>How it works:</strong> Submit your profile and proof of work. Our AI system evaluates your actual capabilities — not just your resume.</p>
                         </div>
 
@@ -214,7 +214,7 @@ export default function CandidateApply() {
                         </div>
 
                         {/* Resume — Prominent */}
-                        <div className="p-5 rounded-xl border border-[rgba(11,95,102,0.2)]" style={{background:'linear-gradient(135deg, rgba(11,95,102,0.06) 0%, rgba(201,162,39,0.04) 100%)'}}>
+                        <div className="p-5 rounded-xl border border-[rgba(11,95,102,0.2)]" style={{ background: 'linear-gradient(135deg, rgba(11,95,102,0.06) 0%, rgba(201,162,39,0.04) 100%)' }}>
                             <label className="block text-sm font-semibold text-[#0f172a] mb-2">
                                 <span className="flex items-center gap-1.5"><FileText className="w-4 h-4 text-[#0b5f66]" /> Resume / CV Link</span>
                             </label>
@@ -269,8 +269,8 @@ export default function CandidateApply() {
 
                             {/* Repo picker */}
                             {showRepoList && (
-                                <div className="mt-3 rounded-xl border border-[#e6e1d7] overflow-hidden" style={{background:'rgba(255,253,248,0.95)',boxShadow:'0 10px 30px rgba(15,23,42,0.08)'}}>
-                                    <div className="p-2 border-b border-[#e6e1d7] flex justify-between items-center sticky top-0 z-10" style={{background:'rgba(247,245,240,0.9)'}}>
+                                <div className="mt-3 rounded-xl border border-[#e6e1d7] overflow-hidden" style={{ background: 'rgba(255,253,248,0.95)', boxShadow: '0 10px 30px rgba(15,23,42,0.08)' }}>
+                                    <div className="p-2 border-b border-[#e6e1d7] flex justify-between items-center sticky top-0 z-10" style={{ background: 'rgba(247,245,240,0.9)' }}>
                                         <span className="text-xs font-bold text-[#475569] uppercase">Select a Repository</span>
                                         <button type="button" onClick={() => setShowRepoList(false)} className="text-xs text-[#0b5f66] hover:underline">Close</button>
                                     </div>
@@ -283,7 +283,7 @@ export default function CandidateApply() {
                                                     <div className="flex justify-between items-start">
                                                         <div className="font-medium text-[#0f172a] flex items-center gap-2">
                                                             {repo.repo}
-                                                            <span className="text-xs font-normal text-[#475569] px-1.5 py-0.5 rounded" style={{background:'rgba(11,95,102,0.08)'}}>
+                                                            <span className="text-xs font-normal text-[#475569] px-1.5 py-0.5 rounded" style={{ background: 'rgba(11,95,102,0.08)' }}>
                                                                 Score: {(repo.score * 10).toFixed(1)}
                                                             </span>
                                                         </div>
@@ -304,7 +304,7 @@ export default function CandidateApply() {
 
                             {/* Repo preview */}
                             {preview && (
-                                <div className="mt-3 rounded-xl border border-[#e6e1d7] p-4" style={{background:'rgba(247,245,240,0.5)'}}>
+                                <div className="mt-3 rounded-xl border border-[#e6e1d7] p-4" style={{ background: 'rgba(247,245,240,0.5)' }}>
                                     <h4 className="text-xs font-semibold text-[#475569] uppercase tracking-wider mb-3">Live Preview</h4>
                                     <div className="flex items-center gap-3 mb-3">
                                         <Folder className="h-5 w-5 text-[#0b5f66]" />
@@ -329,8 +329,8 @@ export default function CandidateApply() {
                                     onChange={(e) => setFormData({ ...formData, leetcode_username: e.target.value })} className={inputClass} />
                             </div>
                             {leetcodeStats && (
-                                <div className="mt-2 rounded-xl p-3 border border-[rgba(11,95,102,0.2)] flex items-center gap-4" style={{background:'rgba(11,95,102,0.06)'}}>
-                                    <div className="p-2 rounded-full" style={{background:'rgba(11,95,102,0.1)'}}>
+                                <div className="mt-2 rounded-xl p-3 border border-[rgba(11,95,102,0.2)] flex items-center gap-4" style={{ background: 'rgba(11,95,102,0.06)' }}>
+                                    <div className="p-2 rounded-full" style={{ background: 'rgba(11,95,102,0.1)' }}>
                                         <FileCode className="h-5 w-5 text-[#0b5f66]" />
                                     </div>
                                     <div>
@@ -361,7 +361,7 @@ export default function CandidateApply() {
                         {/* Submit */}
                         <button type="submit" disabled={submitting}
                             className="w-full flex items-center justify-center gap-2 px-6 py-3.5 text-white font-semibold rounded-xl disabled:opacity-50 transition-all relative overflow-hidden"
-                            style={{background:'linear-gradient(135deg, #0b5f66 0%, #0f766e 65%, #c9a227 120%)',boxShadow:'0 6px 18px rgba(11,95,102,0.28)'}}>
+                            style={{ background: 'linear-gradient(135deg, #0b5f66 0%, #0f766e 65%, #c9a227 120%)', boxShadow: '0 6px 18px rgba(11,95,102,0.28)' }}>
                             {submitting ? (
                                 <><RefreshCw className="w-5 h-5 animate-spin" /> Submitting…</>
                             ) : (
@@ -373,7 +373,7 @@ export default function CandidateApply() {
 
                 {/* Footer */}
                 <p className="text-center text-xs text-[#94a3b8] mt-6">
-                    Powered by <span className="font-semibold" style={{background:'linear-gradient(135deg,#0b5f66,#c9a227)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>SignalStack</span> — AI-driven hiring
+                    Powered by <span className="font-semibold" style={{ background: 'linear-gradient(135deg,#0b5f66,#c9a227)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>SignalStack</span> — AI-driven hiring
                 </p>
             </div>
         </div>

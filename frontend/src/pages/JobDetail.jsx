@@ -425,8 +425,16 @@ export default function JobDetail() {
                                                                         {sub.candidate_name?.charAt(0)?.toUpperCase() || '?'}
                                                                     </div>
                                                                     <div>
-                                                                        <span className="font-medium text-gray-900">{sub.candidate_name}</span>
-                                                                        <span className="text-gray-500 text-sm ml-2">{sub.candidate_email}</span>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="font-medium text-gray-900">{sub.candidate_name}</span>
+                                                                            {sub.status === 'hired' && (
+                                                                                <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-bold rounded-full border border-green-200">HIRED</span>
+                                                                            )}
+                                                                            {sub.status === 'rejected' && (
+                                                                                <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full border border-red-200">Rejected</span>
+                                                                            )}
+                                                                        </div>
+                                                                        <span className="text-gray-500 text-sm">{sub.candidate_email}</span>
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex items-center gap-1">
