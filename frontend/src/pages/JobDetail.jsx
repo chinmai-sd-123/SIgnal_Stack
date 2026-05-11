@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
     Briefcase, MapPin, Building, IndianRupee, Clock,
@@ -25,6 +25,17 @@ export default function JobDetail() {
     const [evaluationProgress, setEvaluationProgress] = useState(null);
     const [queueingEvaluation, setQueueingEvaluation] = useState(false);
 
+    const hasEvaluationActivity = useCallback((progress) => {
+        if (!progress) return false;
+        const submissionCounts = progress.submission_status_counts || {};
+        const candidateCounts = progress.candidate_status_counts || {};
+        const activeCount = Number(progress.active_count || 0);
+        const queueSize = Number(progress.queue_size || 0);
+        const queued = Number(submissionCounts.queued || candidateCounts.queued || 0);
+        const evaluating = Number(submissionCounts.evaluating || candidateCounts.evaluating || 0);
+        return activeCount > 0 || queueSize > 0 || queued > 0 || evaluating > 0;
+    }, []);
+
     useEffect(() => {
         async function loadJob() {
             try {
@@ -48,7 +59,7 @@ export default function JobDetail() {
     }, [jobId]);
 
     useEffect(() => {
-        if (!evaluationProgress?.active_count) return undefined;
+        if (!hasEvaluationActivity(evaluationProgress)) return undefined;
 
         const timer = setInterval(async () => {
             try {
@@ -59,7 +70,26 @@ export default function JobDetail() {
         }, 5000);
 
         return () => clearInterval(timer);
-    }, [jobId, evaluationProgress?.active_count]);
+    }, [jobId, evaluationProgress, hasEvaluationActivity]);
+
+    useEffect(() => {
+        const refreshWhenVisible = async () => {
+            if (document.visibilityState !== 'visible') return;
+            try {
+                setEvaluationProgress(await getJobEvaluationProgress(jobId));
+            } catch (error) {
+                console.warn('Failed to refresh evaluation progress after returning to page', error);
+            }
+        };
+
+        window.addEventListener('focus', refreshWhenVisible);
+        document.addEventListener('visibilitychange', refreshWhenVisible);
+
+        return () => {
+            window.removeEventListener('focus', refreshWhenVisible);
+            document.removeEventListener('visibilitychange', refreshWhenVisible);
+        };
+    }, [jobId]);
 
     const handleGenerateInvite = async () => {
         setGeneratingInvite(true);
@@ -185,6 +215,8 @@ export default function JobDetail() {
     );
 
     if (!job) return <div className="p-8 text-center text-gray-500">Job not found.</div>;
+
+    const evaluationActive = hasEvaluationActivity(evaluationProgress);
 
     return (
         <div className="max-w-5xl mx-auto space-y-8 pb-12">
@@ -358,10 +390,23 @@ export default function JobDetail() {
                 </div>
 
                 {evaluationProgress && (
-                    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                    <div className={`bg-white border rounded-lg p-4 shadow-sm ${evaluationActive ? 'border-indigo-200 ring-1 ring-indigo-100' : 'border-gray-200'}`}>
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                             <div>
-                                <h3 className="font-semibold text-gray-900">Evaluation Progress</h3>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <h3 className="font-semibold text-gray-900">Evaluation Progress</h3>
+                                    {evaluationActive && (
+                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 border border-indigo-100">
+                                            <RefreshCw className="w-3 h-3 animate-spin" />
+                                            Processing
+                                        </span>
+                                    )}
+                                    {evaluationProgress.queue_backend && (
+                                        <span className="inline-flex items-center rounded-full bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600 border border-gray-200">
+                                            Queue: {evaluationProgress.queue_backend}
+                                        </span>
+                                    )}
+                                </div>
                                 <p className="text-xs text-gray-500">
                                     {evaluationProgress.evaluated_count || 0} evaluated from {evaluationProgress.submissions_total || 0} submissions
                                     {evaluationProgress.outcomes_total ? ` - ${evaluationProgress.outcomes_evaluated || 0}/${evaluationProgress.outcomes_total} outcomes ready` : ''}
