@@ -63,3 +63,42 @@ def test_repo_context_is_not_treated_as_code_evidence():
 
     assert service._source_code_evidence(evidence) == []
     assert service._fallback_relevant_evidence(evidence) == "No code evidence found."
+
+
+@pytest.mark.unit
+def test_dimension_scores_from_zero_to_one_scale_are_normalized(monkeypatch):
+    service = OpenAILLMService()
+    service.api_key = "test-key"
+    service.client = object()
+    monkeypatch.setattr(
+        service,
+        "_call_with_retry",
+        lambda prompt, schema: """
+        {
+          "strength": 0.5,
+          "justification": "Partial implementation.",
+          "relevant_evidence": "body = await request.json()",
+          "dimensions": {
+            "project_completion": 0.5,
+            "engineering_quality": 0.6,
+            "communication": 0.4,
+            "innovation": 0.3,
+            "depth_novelty": 0.5
+          }
+        }
+        """,
+    )
+
+    result = service.interpret_signals(
+        "Accepts code input",
+        [
+            {
+                "type": "code_snippet",
+                "ref": "FILE:app/main.py",
+                "snippet": "async def webhook(request):\n    body = await request.json()",
+            }
+        ],
+    )
+
+    assert result["dimensions"]["project_completion"] == 5.0
+    assert result["dimensions"]["engineering_quality"] == 6.0

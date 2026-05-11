@@ -405,9 +405,17 @@ Respond with JSON only. No explanation outside the JSON.
                 relevant = self._fallback_relevant_evidence(evidence)
             result["relevant_evidence"] = relevant
 
-            for key in ["project_completion", "engineering_quality", "communication", "innovation", "depth_novelty"]:
-                dims = result.setdefault("dimensions", {})
-                dims[key] = max(0.0, min(10.0, float(dims.get(key, 0.0))))
+            dimension_keys = ["project_completion", "engineering_quality", "communication", "innovation", "depth_novelty"]
+            dims = result.setdefault("dimensions", {})
+            raw_dims = []
+            for key in dimension_keys:
+                try:
+                    raw_dims.append(float(dims.get(key, 0.0)))
+                except (TypeError, ValueError):
+                    raw_dims.append(0.0)
+            dim_scale = 10.0 if raw_dims and max(raw_dims) <= 1.0 and max(raw_dims) > 0 else 1.0
+            for key, value in zip(dimension_keys, raw_dims):
+                dims[key] = max(0.0, min(10.0, value * dim_scale))
 
             # ── Post-hoc hard cap: fork with no original work ─────────────
             # Belt-and-suspenders in case the LLM ignored the penalty rule

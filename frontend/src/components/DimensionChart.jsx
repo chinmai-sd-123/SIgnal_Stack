@@ -1,138 +1,172 @@
-
 import React from 'react';
-import {
-    Radar,
-    RadarChart,
-    PolarGrid,
-    PolarAngleAxis,
-    PolarRadiusAxis,
-    ResponsiveContainer,
-    Tooltip
-} from 'recharts';
 
-// Custom Tick Component for Multi-line Text
-const CustomTick = ({ payload, x, y, textAnchor }) => {
-    const words = payload.value.split(' ');
-    return (
-        <g className="recharts-layer recharts-polar-angle-axis-tick">
-            <text
-                x={x}
-                y={y}
-                textAnchor={textAnchor}
-                fill="#4b5563"
-                fontSize={9}
-                fontWeight={600}
-            >
-                {words.map((word, i) => (
-                    <tspan x={x} dy={i === 0 ? 0 : 9} key={i}>
-                        {word}
-                    </tspan>
-                ))}
-            </text>
-        </g>
-    );
+const DIMENSIONS = [
+    {
+        key: 'project_completion',
+        label: 'Project Completion',
+        short: 'Completion',
+    },
+    {
+        key: 'engineering_quality',
+        label: 'Code Quality',
+        short: 'Quality',
+    },
+    {
+        key: 'communication',
+        label: 'Communication',
+        short: 'Clarity',
+    },
+    {
+        key: 'innovation',
+        label: 'Innovation',
+        short: 'Ideas',
+    },
+    {
+        key: 'depth_novelty',
+        label: 'Depth',
+        short: 'Depth',
+    },
+];
+
+const numberOrZero = (value) => {
+    const numeric = Number(value ?? 0);
+    return Number.isFinite(numeric) ? numeric : 0;
 };
 
-/**
- * DimensionChart Component
- * Visualizes candidate dimensions using a Radar Chart.
- * 
- * @param {Object} props
- * @param {Object} props.dimensions - Object with dimension keys and scores (0-10)
- */
+const detectScale = (dimensions, averageDimensions) => {
+    const values = DIMENSIONS.flatMap(({ key }) => [
+        numberOrZero(dimensions?.[key]),
+        numberOrZero(averageDimensions?.[key]),
+    ]);
+    const max = Math.max(...values, 0);
+    return max > 0 && max <= 1 ? 1 : 10;
+};
+
+const normalizeScore = (value, scale) => {
+    const numeric = numberOrZero(value);
+    const converted = scale === 1 ? numeric * 10 : numeric;
+    return Math.max(0, Math.min(10, converted));
+};
+
+const formatScore = (value) => {
+    if (value >= 9.95) return '10';
+    if (value <= 0.05) return '0';
+    return value.toFixed(1);
+};
+
+const getTone = (value) => {
+    if (value >= 7) return {
+        text: 'text-emerald-700',
+        fill: 'from-emerald-500 to-teal-500',
+        bg: 'bg-emerald-50',
+        border: 'border-emerald-100',
+    };
+    if (value >= 4.5) return {
+        text: 'text-amber-700',
+        fill: 'from-amber-400 to-yellow-500',
+        bg: 'bg-amber-50',
+        border: 'border-amber-100',
+    };
+    return {
+        text: 'text-red-700',
+        fill: 'from-rose-500 to-red-500',
+        bg: 'bg-red-50',
+        border: 'border-red-100',
+    };
+};
+
+const average = (items) => {
+    if (!items.length) return 0;
+    return items.reduce((sum, item) => sum + item.candidate, 0) / items.length;
+};
+
 const DimensionChart = ({ dimensions, averageDimensions }) => {
     if (!dimensions) return null;
 
-    const score = (value) => {
-        const numeric = Number(value ?? 0);
-        if (Number.isNaN(numeric)) return 0;
-        return Math.max(0, Math.min(10, numeric));
-    };
+    const scale = detectScale(dimensions, averageDimensions);
+    const rows = DIMENSIONS.map((dimension) => ({
+        ...dimension,
+        candidate: normalizeScore(dimensions?.[dimension.key], scale),
+        average: averageDimensions
+            ? normalizeScore(averageDimensions?.[dimension.key], scale)
+            : null,
+    }));
 
-    // Format data for Recharts
-    // Note: ensure spaces are present where line breaks are desired
-    const data = [
-        {
-            subject: 'Project Done',
-            A: score(dimensions.project_completion),
-            B: score(averageDimensions?.project_completion),
-            fullMark: 10,
-        },
-        {
-            subject: 'Code Quality',
-            A: score(dimensions.engineering_quality),
-            B: score(averageDimensions?.engineering_quality),
-            fullMark: 10,
-        },
-        {
-            subject: 'Communication',
-            A: score(dimensions.communication),
-            B: score(averageDimensions?.communication),
-            fullMark: 10,
-        },
-        {
-            subject: 'Innovation',
-            A: score(dimensions.innovation),
-            B: score(averageDimensions?.innovation),
-            fullMark: 10,
-        },
-        {
-            subject: 'Depth',
-            A: score(dimensions.depth_novelty),
-            B: score(averageDimensions?.depth_novelty),
-            fullMark: 10,
-        },
-    ];
+    const candidateAverage = average(rows);
+    const roleAverage = averageDimensions ? average(rows.map((row) => ({ candidate: row.average ?? 0 }))) : null;
+    const tone = getTone(candidateAverage);
 
     return (
-        <div className="w-full h-[280px] sm:h-[320px] flex items-center justify-center overflow-visible">
-            <ResponsiveContainer width="100%" height="100%">
-                <RadarChart
-                    cx="50%"
-                    cy="50%"
-                    outerRadius="62%"
-                    data={data}
-                    margin={{ top: 16, right: 18, left: 18, bottom: 16 }}
-                >
-                    <PolarGrid stroke="#e5e7eb" />
-                    <PolarAngleAxis
-                        dataKey="subject"
-                        tick={<CustomTick />}
-                    />
-                    <PolarRadiusAxis
-                        angle={30}
-                        domain={[0, 10]}
-                        tick={false}
-                        axisLine={false}
-                    />
-                    <Tooltip
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        formatter={(value, name) => [Number(value).toFixed(1), name]}
-                    />
-
-                    {/* Average Score Radar (Background) */}
-                    {averageDimensions && (
-                        <Radar
-                            name="Role Average"
-                            dataKey="B"
-                            stroke="#9ca3af"
-                            fill="#9ca3af"
-                            fillOpacity={0.1} // Lighter fill for background
-                            strokeDasharray="4 4" // Dashed line for distinction
-                        />
+        <div className="w-full space-y-4">
+            <div className={`rounded-xl border ${tone.border} ${tone.bg} p-4`}>
+                <div className="flex items-end justify-between gap-3">
+                    <div>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Candidate</div>
+                        <div className={`mt-1 text-3xl font-bold ${tone.text}`}>
+                            {formatScore(candidateAverage)}
+                            <span className="text-sm font-semibold text-gray-500">/10</span>
+                        </div>
+                    </div>
+                    {roleAverage !== null && (
+                        <div className="text-right">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Role Avg</div>
+                            <div className="mt-1 text-lg font-bold text-gray-600">
+                                {formatScore(roleAverage)}
+                                <span className="text-xs font-semibold text-gray-400">/10</span>
+                            </div>
+                        </div>
                     )}
+                </div>
+            </div>
 
-                    {/* Candidate Score Radar (Foreground) */}
-                    <Radar
-                        name="Candidate Score"
-                        dataKey="A"
-                        stroke="#6366f1"
-                        fill="#6366f1"
-                        fillOpacity={0.6}
-                    />
+            <div className="space-y-3">
+                {rows.map((row) => {
+                    const rowTone = getTone(row.candidate);
+                    const candidatePercent = `${row.candidate * 10}%`;
+                    const averagePercent = row.average === null ? null : `${row.average * 10}%`;
 
-                </RadarChart>
-            </ResponsiveContainer>
+                    return (
+                        <div key={row.key} className="space-y-1.5">
+                            <div className="flex items-baseline justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-gray-800 truncate">{row.label}</div>
+                                    <div className="text-[11px] font-medium text-gray-400">{row.short}</div>
+                                </div>
+                                <div className={`text-sm font-bold tabular-nums ${rowTone.text}`}>
+                                    {formatScore(row.candidate)}
+                                </div>
+                            </div>
+
+                            <div className="relative h-3 rounded-full bg-gray-100">
+                                <div
+                                    className={`absolute inset-y-0 left-0 rounded-full bg-gradient-to-r ${rowTone.fill}`}
+                                    style={{ width: candidatePercent }}
+                                />
+                                {averagePercent && (
+                                    <div
+                                        className="absolute top-[-2px] h-7 w-0.5 rounded-full bg-gray-500/70"
+                                        style={{ left: averagePercent }}
+                                        title={`Role average ${formatScore(row.average)}/10`}
+                                    />
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {averageDimensions && (
+                <div className="flex items-center gap-4 text-[11px] font-semibold text-gray-500 pt-1">
+                    <div className="flex items-center gap-1.5">
+                        <span className="h-2.5 w-5 rounded-full bg-gradient-to-r from-rose-500 to-red-500" />
+                        <span>Candidate</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        <span className="h-4 w-0.5 rounded-full bg-gray-500/70" />
+                        <span>Role Avg</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
