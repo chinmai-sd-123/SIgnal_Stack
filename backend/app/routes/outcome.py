@@ -4,6 +4,7 @@ from typing import List
 import app.schemas as schemas
 from app.config.database import get_db
 from app.services import crud
+from app.services.submission_proof_service import sync_outcome_invite_proofs
 from app.pipeline.outcome import OutcomePipeline
 
 router = APIRouter(tags=["Outcome"])
@@ -21,6 +22,7 @@ def create_outcome(outcome: schemas.OutcomeCreate, db: Session = Depends(get_db)
     
     # Audit Log
     crud.create_audit_log(db, "outcome", result.id, "created", {"title": outcome.title})
+    sync_outcome_invite_proofs(db, result.id)
     return result
 
 @router.get("/outcomes/templates", response_model=List[schemas.OutcomeResponse])

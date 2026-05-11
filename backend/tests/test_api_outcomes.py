@@ -88,3 +88,56 @@ def test_submit_and_get_proofs(client):
     proofs = get_resp.json()
     assert len(proofs) == 1
     assert proofs[0]["candidate_id"] == "cand-1"
+
+
+@pytest.mark.integration
+def test_invited_candidate_is_backfilled_to_outcome_created_after_submission(client):
+    job_resp = client.post("/jobs", json={
+        "title": "Machine Learning Engineer Intern",
+        "description": "Evaluate intern ML projects",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Machine Learning",
+        "job_type": "Internship",
+        "required_languages": ["Python"],
+    })
+    assert job_resp.status_code == 200
+    job_id = job_resp.json()["id"]
+
+    invite_resp = client.post(f"/jobs/{job_id}/invites")
+    assert invite_resp.status_code == 200
+    token = invite_resp.json()["token"]
+
+    submit_resp = client.post(f"/invites/{token}/submit", json={
+        "candidate_name": "Candidate One",
+        "candidate_email": "candidate@example.com",
+        "github_username": "candidate-one",
+        "repo_url": "https://github.com/candidate-one/health-monitor",
+        "resume_url": "https://drive.google.com/resume",
+    })
+    assert submit_resp.status_code == 200
+
+    outcome_resp = client.post("/outcomes", json={
+        "job_id": job_id,
+        "title": "Train Health Monitoring Model",
+        "description": "Train a baseline ML model for health risk prediction",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Machine Learning",
+        "job_type": "Internship",
+        "tasks": [
+            {"name": "Train baseline model", "priority": "High", "weight": 1.0},
+        ],
+    })
+    assert outcome_resp.status_code == 200
+    outcome_id = outcome_resp.json()["id"]
+
+    proofs_resp = client.get(f"/proofs/{outcome_id}")
+    assert proofs_resp.status_code == 200
+    proofs = proofs_resp.json()
+
+    assert len(proofs) == 1
+    assert proofs[0]["candidate_id"] == "candidate-one"
+    assert proofs[0]["payload"]["repo_url"] == "https://github.com/candidate-one/health-monitor"
+    assert proofs[0]["payload"]["resume_url"] == "https://drive.google.com/resume"
+    assert proofs[0]["payload"]["artifact_link"] == ""

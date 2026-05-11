@@ -4,6 +4,7 @@ from typing import List
 import app.schemas as schemas
 from app.config.database import get_db
 from app.services import crud
+from app.services.submission_proof_service import sync_outcome_invite_proofs
 from app.pipeline.signal_extractor import SignalExtractor
 from app.services.leetcode import LeetCodeService
 
@@ -23,6 +24,7 @@ def submit_proof(proof: schemas.ProofCreate, db: Session = Depends(get_db)):
 
 @router.get("/proofs/{job_id}", response_model=List[schemas.ProofCreate])
 def get_proofs(job_id: str, db: Session = Depends(get_db)):
+    sync_outcome_invite_proofs(db, job_id)
     proofs = crud.get_proofs(db, job_id)
     return [schemas.ProofCreate(
         job_id=p.outcome_id,

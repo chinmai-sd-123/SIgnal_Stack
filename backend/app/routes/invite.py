@@ -6,9 +6,13 @@ import uuid
 from app.config.database import get_db
 from app.models.invite import Invite, InviteSubmission
 from app.models.job import Job
-from app.models.outcome import Outcome
 from app.models.proof import Proof
 from app.services.bulk_evaluation_service import ensure_job_candidate
+from app.services.submission_proof_service import (
+    create_proofs_for_submission,
+    get_candidate_id,
+    proof_payload_for_submission,
+)
 from app.utils.time_utils import utc_now
 
 router = APIRouter(tags=["Invites"])
@@ -20,51 +24,17 @@ INVITE_EXPIRY_DAYS = 7
 
 def _get_candidate_id(submission: InviteSubmission) -> str:
     """Derive a stable candidate_id from submission data."""
-    return submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
+    return get_candidate_id(submission)
 
 
 def _proof_payload_for_submission(submission: InviteSubmission):
     """Build the evaluator payload for an invite submission."""
-    return {
-        "repo_url": submission.repo_url or "",
-        "github_username": submission.github_username or "",
-        "leetcode_username": submission.leetcode_username or "",
-        "artifact_link": "" if submission.repo_url else (submission.resume_url or ""),
-        "resume_url": submission.resume_url or "",
-        "context": submission.context or "",
-        "candidate_name": submission.candidate_name,
-        "candidate_email": submission.candidate_email,
-        "linkedin_url": submission.linkedin_url or "",
-        "source": "invite",
-        "invite_submission_id": submission.id,
-    }
+    return proof_payload_for_submission(submission)
 
 
 def _create_proofs_for_submission(db: Session, submission: InviteSubmission, job_id: str):
     """Create Proof records across all outcomes for a candidate submission."""
-    candidate_id = _get_candidate_id(submission)
-    outcomes = db.query(Outcome).filter(Outcome.job_id == job_id).all()
-
-    created = 0
-    for outcome in outcomes:
-        # Skip if proof already exists
-        existing = db.query(Proof).filter(
-            Proof.outcome_id == outcome.id,
-            Proof.candidate_id == candidate_id,
-        ).first()
-        if existing:
-            continue
-
-        proof = Proof(
-            outcome_id=outcome.id,
-            candidate_id=candidate_id,
-            type="github" if submission.repo_url else "work_artifact",
-            payload_json=_proof_payload_for_submission(submission),
-        )
-        db.add(proof)
-        created += 1
-
-    return created
+    return create_proofs_for_submission(db, submission, job_id)
 
 
 def _delete_proofs_for_submission(db: Session, submission: InviteSubmission):
