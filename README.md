@@ -22,7 +22,7 @@
   <img src="https://img.shields.io/badge/node-20+-339933?logo=node.js&logoColor=white" alt="Node 20+">
   <img src="https://img.shields.io/badge/FastAPI-0.128-009688?logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black" alt="React 18">
-  <img src="https://img.shields.io/badge/OpenAI-gpt--4o--mini-412991?logo=openai&logoColor=white" alt="OpenAI">
+  <img src="https://img.shields.io/badge/OpenAI-gpt--5--mini-412991?logo=openai&logoColor=white" alt="OpenAI">
   <img src="https://img.shields.io/badge/license-proprietary-red" alt="License">
 </p>
 
