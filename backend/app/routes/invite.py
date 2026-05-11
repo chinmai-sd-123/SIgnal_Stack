@@ -186,28 +186,50 @@ def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(submission)
 
-    # Trigger evaluation pipeline if repo_url is provided
-    if submission.repo_url:
-        try:
-            candidate_id = submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
+    # Create Proof records for each outcome in the job so candidates
+    # appear in OutcomeDashboard and can be evaluated
+    try:
+        from app.models.outcome import Outcome
+        from app.models.proof import Proof
 
-            from app.pipeline.proof import ProofPipeline
-            pipeline = ProofPipeline(db)
-            pipeline.submit_proof(
-                job_id=invite.job_id,
+        candidate_id = submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
+        outcomes = db.query(Outcome).filter(Outcome.job_id == invite.job_id).all()
+
+        for outcome in outcomes:
+            # Check if proof already exists for this candidate + outcome
+            existing_proof = db.query(Proof).filter(
+                Proof.outcome_id == outcome.id,
+                Proof.candidate_id == candidate_id,
+            ).first()
+            if existing_proof:
+                continue
+
+            proof = Proof(
+                outcome_id=outcome.id,
                 candidate_id=candidate_id,
-                proof_type="github",
-                payload={
-                    "repo_url": submission.repo_url,
-                    "leetcode_username": submission.leetcode_username,
-                    "context": submission.context,
+                type="github" if submission.repo_url else "work_artifact",
+                payload_json={
+                    "repo_url": submission.repo_url or "",
+                    "leetcode_username": submission.leetcode_username or "",
+                    "artifact_link": submission.resume_url or "",
+                    "context": submission.context or "",
+                    "candidate_name": submission.candidate_name,
+                    "candidate_email": submission.candidate_email,
+                    "linkedin_url": submission.linkedin_url or "",
+                    "source": "invite",
+                    "invite_submission_id": submission.id,
                 },
             )
-        except Exception as e:
-            print(f"[WARN] Evaluation pipeline error for submission {submission.id}: {e}")
+            db.add(proof)
+
+        db.commit()
+        print(f"[OK] Created {len(outcomes)} proof(s) for invite submission {submission.id}")
+    except Exception as e:
+        print(f"[WARN] Failed to create proofs for submission {submission.id}: {e}")
 
     return {
         "message": "Application submitted successfully",
         "submission_id": submission.id,
         "status": submission.status,
     }
+
