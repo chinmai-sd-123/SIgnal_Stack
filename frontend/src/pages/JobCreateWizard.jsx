@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Briefcase, MapPin, Building, IndianRupee, CheckCircle, RefreshCw, ArrowRight } from 'lucide-react';
-import { createJob, getOutcomeTemplates } from '../api';
+import { getOutcomeTemplates } from '../api';
 import TemplateSelector from '../components/TemplateSelector';
 
 export default function JobCreateWizard() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1); // 1: Job Info, 2: Template Selection
-  const [loading, setLoading] = useState(false);
+  const [loading] = useState(false);
   const [templates, setTemplates] = useState([]);
 
   const [formData, setFormData] = useState({

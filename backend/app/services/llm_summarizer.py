@@ -9,12 +9,18 @@ Provides safe, auditable LLM (OpenAI) usage for:
 """
 
 import json
+import logging
 import time
 from typing import Dict, Any, Optional
+
 from sqlalchemy.orm import Session
 
 from app.models.snapshot import LLMLog
+from app.config.config import config
 from app.services.llm import llm_service
+
+
+logger = logging.getLogger(__name__)
 
 
 # Expected response schema for validation
@@ -68,6 +74,27 @@ def validate_response_schema(response: Dict[str, Any]) -> bool:
         return True
     except Exception:
         return False
+
+
+def _parse_json_response(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Best-effort JSON extraction from LLM output."""
+    if not raw_text:
+        return None
+    response_text = raw_text.strip()
+    if response_text.startswith("```"):
+        parts = response_text.split("```")
+        if len(parts) > 1:
+            response_text = parts[1].strip()
+            if response_text.startswith("json"):
+                response_text = response_text[4:].strip()
+    try:
+        return json.loads(response_text)
+    except json.JSONDecodeError:
+        start_obj = response_text.find("{")
+        end_obj = response_text.rfind("}") + 1
+        if start_obj != -1 and end_obj > start_obj:
+            return json.loads(response_text[start_obj:end_obj])
+    return None
 
 
 def validate_label_schema(response: Dict[str, Any]) -> bool:
@@ -215,6 +242,9 @@ def summarize_with_llm(
     Returns:
         Summary dictionary (from LLM or deterministic fallback)
     """
+    if not config.ENABLE_LLM_SUMMARIZATION:
+        return generate_deterministic_summary(signals, scoring_result)
+
     prompt = build_summarization_prompt(signals, scoring_result, task_context)
     
     start_time = time.time()
@@ -228,22 +258,13 @@ def summarize_with_llm(
         latency_ms = int((time.time() - start_time) * 1000)
         
         # Try to parse JSON from response
-        try:
-            # Handle potential markdown code blocks
-            response_text = raw_response.strip()
-            if response_text.startswith("```"):
-                response_text = response_text.split("```")[1]
-                if response_text.startswith("json"):
-                    response_text = response_text[4:]
-            
-            validated_json = json.loads(response_text)
-            is_valid = validate_response_schema(validated_json)
-        except json.JSONDecodeError:
-            is_valid = False
+        validated_json = _parse_json_response(raw_response)
+        is_valid = validate_response_schema(validated_json) if validated_json else False
         
     except Exception as e:
         raw_response = f"Error: {str(e)}"
         latency_ms = int((time.time() - start_time) * 1000)
+        logger.warning("LLM summarization error: %s", e)
     
     # Log to database
     log_entry = LLMLog(

@@ -248,10 +248,12 @@ OPENAI_API_KEY=sk-your_openai_api_key_here
 # ─── OPTIONAL ───────────────────────────────────────
 OPENAI_MODEL=gpt-4o-mini                   # Default model
 DATABASE_URL=postgresql://user:password@host/dbname # Default: PostgreSQL
+DATABASE_URL_TEST=postgresql://user:password@host/dbname_test # Test DB for pytest
 REDIS_URL=redis://localhost:6379/0          # Falls back to in-memory
 JWT_SECRET=change-this-in-production
 WORKER_THREADS=3
 ENABLE_LLM_SUMMARIZATION=true
+PUBLIC_BASE_URL=http://localhost:3000       # Public job page base URL
 DEBUG=false
 ```
 
@@ -495,12 +497,56 @@ signalstack/
 | `OPENAI_API_KEY` | **Yes** | — | OpenAI API key for LLM features |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | OpenAI model identifier |
 | `DATABASE_URL` | No | `sqlite:///./signalstack.db` | SQLAlchemy database URL |
+| `DATABASE_URL_TEST` | No | — | Postgres test database URL for integration tests |
 | `REDIS_URL` | No | — | Redis connection URL for caching |
 | `JWT_SECRET` | No | `dev-secret-...` | JWT signing secret (**change in production**) |
 | `SIGNALSTACK_API_KEY` | No | — | API key for external integrations |
 | `WORKER_THREADS` | No | `3` | Number of background worker threads |
 | `ENABLE_LLM_SUMMARIZATION` | No | `true` | Toggle LLM-enhanced analysis |
+| `PUBLIC_BASE_URL` | No | `http://localhost:3000` | Base URL for public job links |
 | `DEBUG` | No | `false` | Enable verbose debug logging |
+
+---
+
+## Testing
+
+Backend tests are split into fast unit tests and Postgres-backed integration tests. The repository-level
+`pytest.ini` sets `backend/` on `PYTHONPATH`, disables pytest cache writes, and points pytest at
+`backend/tests`.
+
+```bash
+# Install test dependencies
+python -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
+
+# Run the full backend suite
+python -m pytest -v
+
+# Run only unit tests
+python -m pytest -m unit -v
+
+# Run only integration tests
+DATABASE_URL_TEST=postgresql://user:password@host/dbname_test python -m pytest -m integration -v
+```
+
+Current verification status:
+
+| Check | Command | Status |
+|-------|---------|--------|
+| Backend tests | `python -m pytest -v` | 13 passing |
+| Frontend lint | `npm run lint` | Passing |
+| Frontend build | `npm run build` | Passing |
+
+On Windows PowerShell, if `npm run ...` is blocked by the script execution policy, run the same command
+through `npm.cmd`, for example `npm.cmd run build`.
+
+### Frontend Quality Checks
+
+```bash
+cd frontend
+npm install
+npm run lint
+npm run build
+```
 
 ---
 

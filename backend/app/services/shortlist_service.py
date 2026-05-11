@@ -1,9 +1,9 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from fastapi import HTTPException
-import datetime
 from app.models.job import Job
 from app.models.job_candidate import JobCandidate
+from app.utils.time_utils import utc_now
 import uuid
 
 
@@ -48,7 +48,7 @@ class ShortlistService:
             job_id=job_id,
             candidate_id=candidate_id,
             status="applied",
-            applied_at=datetime.datetime.utcnow()
+            applied_at=utc_now()
         )
         
         db.add(application)
@@ -78,7 +78,7 @@ class ShortlistService:
         candidate.evaluation_score = evaluation_score
         candidate.outcome_coverage = outcome_coverage
         candidate.evaluation_data = evaluation_data
-        candidate.evaluated_at = datetime.datetime.utcnow()
+        candidate.evaluated_at = utc_now()
         
         db.commit()
         db.refresh(candidate)
@@ -105,14 +105,14 @@ class ShortlistService:
             JobCandidate.status == "evaluated"
         ).order_by(desc(JobCandidate.evaluation_score)).all()
         
-        shortlist_size = job.shortlist_size
+        shortlist_size = max(0, job.shortlist_size or 0)
         
         if auto_select:
             # Auto-select top N
             for i, candidate in enumerate(candidates):
                 if i < shortlist_size:
                     candidate.status = "shortlisted"
-                    candidate.shortlisted_at = datetime.datetime.utcnow()
+                    candidate.shortlisted_at = utc_now()
             
             db.commit()
         
@@ -164,7 +164,7 @@ class ShortlistService:
             if candidate.id in shortlisted_candidate_ids:
                 candidate.status = "shortlisted"
                 if not candidate.shortlisted_at:
-                    candidate.shortlisted_at = datetime.datetime.utcnow()
+                    candidate.shortlisted_at = utc_now()
             else:
                 candidate.status = "evaluated"
                 candidate.shortlisted_at = None
@@ -208,7 +208,7 @@ class ShortlistService:
         # Close applications and update status
         job.applications_open = False
         job.status = "closed"
-        job.updated_at = datetime.datetime.utcnow()
+        job.updated_at = utc_now()
         
         db.commit()
         db.refresh(job)

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List
 
 # What user sends when creating/editing a task
@@ -18,15 +18,14 @@ class TaskBatchCreate(BaseModel):
     tasks: List[TaskCreate]
 
 class TaskResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     outcome_id: str
     name: str
     priority: str
     weight: float
     version: int
-
-    class Config:
-        from_attributes = True
 
 class TaskSuggestionRequest(BaseModel):
     description: str

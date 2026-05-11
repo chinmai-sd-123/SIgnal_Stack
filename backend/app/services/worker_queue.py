@@ -10,15 +10,20 @@ Implements a simple background task queue for:
 Uses threading for simplicity. Production could use Celery or RQ.
 """
 
-import threading
+import logging
 import queue
+import threading
 import time
-import uuid
-from typing import Callable, Dict, Any, Optional, List
-from datetime import datetime
-from dataclasses import dataclass, field
-from enum import Enum
 import traceback
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Callable, Dict, Any, Optional, List
+
+from app.utils.time_utils import utc_now
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(Enum):
@@ -40,7 +45,7 @@ class Task:
     status: TaskStatus = TaskStatus.PENDING
     result: Any = None
     error: str = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=utc_now)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     priority: int = 0  # Higher = more urgent
@@ -76,7 +81,7 @@ class WorkerQueue:
             worker.start()
             self.workers.append(worker)
         
-        print(f"Started {self.num_workers} worker threads")
+        logger.info("Started %s worker threads", self.num_workers)
     
     def stop(self, wait: bool = True, timeout: float = 10.0):
         """Stop worker threads."""
@@ -94,7 +99,7 @@ class WorkerQueue:
                 worker.join(timeout=timeout)
         
         self.workers.clear()
-        print("Worker threads stopped")
+        logger.info("Worker threads stopped")
     
     def _worker_loop(self):
         """Main worker loop - pulls tasks from queue and executes them."""
@@ -102,21 +107,28 @@ class WorkerQueue:
             try:
                 # Block with timeout to allow checking running flag
                 priority, task = self.task_queue.get(timeout=1)
-                
-                if task is None:  # Poison pill
-                    break
-                
-                self._execute_task(task)
-                
             except queue.Empty:
                 continue
+            try:
+                if task is None:  # Poison pill
+                    break
+
+                if task.status == TaskStatus.CANCELLED:
+                    continue
+
+                self._execute_task(task)
             except Exception as e:
-                print(f"Worker error: {e}")
+                logger.warning("Worker error: %s", e)
+            finally:
+                try:
+                    self.task_queue.task_done()
+                except ValueError:
+                    pass
     
     def _execute_task(self, task: Task):
         """Execute a single task."""
         task.status = TaskStatus.RUNNING
-        task.started_at = datetime.utcnow()
+        task.started_at = utc_now()
         
         try:
             result = task.func(*task.args, **task.kwargs)
@@ -126,7 +138,7 @@ class WorkerQueue:
             task.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
             task.status = TaskStatus.FAILED
         finally:
-            task.completed_at = datetime.utcnow()
+            task.completed_at = utc_now()
     
     def enqueue(
         self,
@@ -141,6 +153,9 @@ class WorkerQueue:
         
         Returns task ID for tracking.
         """
+        if not self.running:
+            self.start()
+
         task_id = str(uuid.uuid4())[:8]
         
         task = Task(
@@ -157,7 +172,13 @@ class WorkerQueue:
         
         # Priority queue uses (priority, task), lower = first
         # Negate priority so higher number = more urgent
-        self.task_queue.put((-priority, task))
+        try:
+            self.task_queue.put((-priority, task), timeout=2)
+        except queue.Full:
+            task.status = TaskStatus.FAILED
+            task.error = "Queue full. Task not enqueued."
+            task.completed_at = utc_now()
+            logger.warning("Queue full. Task %s not enqueued.", task_id)
         
         return task_id
     
@@ -186,6 +207,8 @@ class WorkerQueue:
         
         if task.status == TaskStatus.PENDING:
             task.status = TaskStatus.CANCELLED
+            task.error = "Cancelled before execution."
+            task.completed_at = utc_now()
             return True
         
         return False
@@ -207,7 +230,7 @@ class WorkerQueue:
     
     def cleanup_old_tasks(self, max_age_hours: int = 24):
         """Remove completed tasks older than max_age_hours."""
-        cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+        cutoff = utc_now() - timedelta(hours=max_age_hours)
         
         with self._lock:
             to_remove = [
@@ -219,9 +242,6 @@ class WorkerQueue:
                 del self.tasks[task_id]
         
         return len(to_remove)
-
-
-from datetime import timedelta
 
 # Global worker queue instance
 worker_queue = WorkerQueue(num_workers=3)

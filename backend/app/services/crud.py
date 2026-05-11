@@ -168,7 +168,7 @@ def create_evaluation(db: Session, evaluation: schemas.EvaluationResponse):
     db_eval = models.Evaluation(
         job_id=evaluation.job_id,
         outcome_id=evaluation.job_id,
-        evaluation_json=evaluation.dict(),
+        evaluation_json=evaluation.model_dump(),
         fit_score=evaluation.fit_score
     )
     db.add(db_eval)
@@ -280,8 +280,13 @@ def reset_evaluation_decision(db: Session, job_id: str):
     return None
 
 def create_feedback(db: Session, feedback: schemas.FeedbackCreate):
+    eval_id = None
+    if isinstance(feedback.evaluation_id, int):
+        eval_id = feedback.evaluation_id
+    elif isinstance(feedback.evaluation_id, str) and feedback.evaluation_id.isdigit():
+        eval_id = int(feedback.evaluation_id)
     db_feedback = models.Feedback(
-        evaluation_id=int(feedback.evaluation_id) if feedback.evaluation_id.isdigit() else None,
+        evaluation_id=eval_id,
         job_id=feedback.job_id,
         result=feedback.result,
         metrics_json=feedback.metrics

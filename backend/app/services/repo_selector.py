@@ -9,12 +9,20 @@ Selects the top 3 most relevant repositories for a candidate based on:
 5. Language matching (match job requirements)
 """
 
+import logging
 import re
+import time
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass
+
 import requests
+
 from app.config.config import config
+from app.services.cache import cache
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -209,47 +217,99 @@ class RepoSelector:
             "User-Agent": "SignalStack-Agent/1.0"
         }
         self.api_base = "https://api.github.com"
+        self._session = requests.Session()
+        # Respect environment proxy settings if present.
+        self._session.trust_env = True
 
-    def _request(self, url: str) -> Optional[requests.Response]:
-        """Make a GitHub API request with error handling."""
-        try:
-            session = requests.Session()
-            # Respect environment proxy settings if present.
-            session.trust_env = True
-            response = session.get(url, headers=self.headers, timeout=10)
-            if response.status_code == 200:
-                return response
-            print(f"GitHub API error: {response.status_code} for {url}")
+    def _request(self, url: str, max_retries: int = 3) -> Optional[requests.Response]:
+        """Make a GitHub API request with basic retries and rate-limit handling."""
+        headers = self.headers.copy()
+
+        for attempt in range(max_retries):
             try:
-                print(f"GitHub API response: {response.text[:500]}")
-            except Exception:
-                pass
-        except Exception as e:
-            print(f"Request error: {e}")
+                response = self._session.get(url, headers=headers, timeout=10)
+
+                remaining = response.headers.get("X-RateLimit-Remaining")
+                reset_at = response.headers.get("X-RateLimit-Reset")
+                remaining_int = None
+                if remaining is not None:
+                    try:
+                        remaining_int = int(remaining)
+                    except ValueError:
+                        remaining_int = None
+
+                if response.status_code == 403 and remaining_int == 0 and reset_at:
+                    wait = max(0, int(reset_at) - int(time.time())) + 2
+                    logger.warning("[RepoSelector] Rate limit exhausted. Waiting %ss.", wait)
+                    time.sleep(wait)
+                    continue
+
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    logger.warning("[RepoSelector] 429 received. Waiting %ss (attempt %s).", retry_after, attempt + 1)
+                    time.sleep(retry_after)
+                    continue
+
+                if response.status_code >= 500:
+                    wait = (2 ** attempt) * 2
+                    logger.warning("[RepoSelector] %s error. Backing off %ss (attempt %s).", response.status_code, wait, attempt + 1)
+                    time.sleep(wait)
+                    continue
+
+                if response.status_code in (401, 403) and self.token:
+                    logger.warning("[RepoSelector] %s with token. Retrying without token.", response.status_code)
+                    headers = {"User-Agent": "SignalStack-Agent/1.0"}
+                    continue
+
+                if response.status_code == 200:
+                    return response
+
+                logger.warning("[RepoSelector] GitHub API error %s for %s", response.status_code, url)
+                return None
+            except requests.exceptions.RequestException as e:
+                logger.warning("[RepoSelector] Request error: %s", e)
+                return None
+
+        logger.warning("[RepoSelector] All %s attempts failed for %s", max_retries, url)
         return None
 
     def _get_user_repos(self, username: str, limit: int = 30) -> List[Dict]:
         """Fetch user's public repositories."""
         url = f"{self.api_base}/users/{username}/repos?per_page={limit}&sort=updated"
+        cached = cache.get_github_response(url)
+        if isinstance(cached, list):
+            return cached
         response = self._request(url)
         if response:
-            return response.json()
+            data = response.json()
+            cache.set_github_response(url, data)
+            return data
         return []
 
     def _get_repo_info(self, owner: str, repo: str) -> Optional[Dict]:
         """Get detailed info for a single repo."""
         url = f"{self.api_base}/repos/{owner}/{repo}"
+        cached = cache.get_github_response(url)
+        if isinstance(cached, dict):
+            return cached
         response = self._request(url)
         if response:
-            return response.json()
+            data = response.json()
+            cache.set_github_response(url, data)
+            return data
         return None
 
     def _get_repo_contents(self, owner: str, repo: str) -> List[str]:
         """Get root-level file names."""
         url = f"{self.api_base}/repos/{owner}/{repo}/contents"
+        cached = cache.get_github_response(url)
+        if isinstance(cached, list):
+            return [item.get("name", "") for item in cached if isinstance(item, dict)]
         response = self._request(url)
         if response:
-            return [item.get("name", "") for item in response.json() if isinstance(item, dict)]
+            data = response.json()
+            cache.set_github_response(url, data)
+            return [item.get("name", "") for item in data if isinstance(item, dict)]
         return []
 
     def _fuzzy_name_match(self, repo_name: str, keywords: List[str]) -> float:

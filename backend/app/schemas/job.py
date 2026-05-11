@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 
@@ -23,15 +23,16 @@ class JobCreate(JobBase):
 
 class OutcomeMinimal(BaseModel):
     """Minimal outcome info for job listings."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     title: str
     status: str = "active"
-    
-    class Config:
-        from_attributes = True
 
 
 class JobResponse(JobBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     slug: Optional[str] = None
     category_slug: Optional[str] = None
@@ -47,6 +48,3 @@ class JobResponse(JobBase):
     created_at: datetime
     # Include outcomes for job dashboard
     outcomes: List[OutcomeMinimal] = []
-    
-    class Config:
-        from_attributes = True

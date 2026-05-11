@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, JSON, Float, DateTime, ForeignKey
 from app.config.database import Base
-import datetime
+from app.utils.time_utils import utc_now
 
 class Evaluation(Base):
     __tablename__ = "evaluations"
@@ -15,4 +15,4 @@ class Evaluation(Base):
     work_allocation = Column(JSON, nullable=True)  # Allocation result
     confidence = Column(Float, nullable=True)  # Confidence score
     risk_flags = Column(JSON, nullable=True)  # e.g., ["low_authorship", "partial_coverage"]
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)

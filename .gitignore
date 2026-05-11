@@ -71,13 +71,21 @@ pnpm-debug.log*
 # ==========================================
 # Testing & Debug Artifacts
 # ==========================================
+.pytest_cache/
+.coverage
+htmlcov/
 *.pkl
 coverage/
 .nyc_output/
+.mypy_cache/
+.ruff_cache/
+.tox/
 
 # ==========================================
 # Temporary & Generated Files
 # ==========================================
+frontend/dist/
+backend/data/snapshots/
 *.tmp
 *.bak
 *.orig

@@ -13,7 +13,7 @@ import { ArrowLeft, Award, TrendingUp, CheckCircle, XCircle, ExternalLink, Chevr
  *   - onHire: function to hire this candidate
  *   - onReject: function to reject this candidate
  */
-export default function CandidateDetailView({ candidate, allocations, allAllocations, allSummaries, processing, onBack, onHire, onReject, jobId }) {
+export default function CandidateDetailView({ candidate, allAllocations, allSummaries, processing, onBack, onHire, onReject, jobId }) {
     const [expandedTask, setExpandedTask] = useState(null);
     const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
 
@@ -278,7 +278,6 @@ export default function CandidateDetailView({ candidate, allocations, allAllocat
                 isOpen={isFeedbackModalOpen}
                 onClose={() => setIsFeedbackModalOpen(false)}
                 job={{ id: candidate.job_id || jobId || 'unknown' }}
-                candidateName={candidate.candidate_id}
                 tasks={relevantAllocations.map(a => a.task_title)}
             />
         </div>

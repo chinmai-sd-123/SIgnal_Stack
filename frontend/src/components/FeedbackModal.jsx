@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, ThumbsUp, ThumbsDown, AlertTriangle, CheckCircle, Lightbulb, TrendingUp, TrendingDown } from 'lucide-react';
 import { submitTaskFeedback } from '../api';
 
-export default function FeedbackModal({ isOpen, onClose, job, candidateName, tasks }) {
+export default function FeedbackModal({ isOpen, onClose, job, tasks }) {
     // Map of taskName -> 'boost' | 'penalize' | null
     const [taskFeedback, setTaskFeedback] = useState({});
     const [reason, setReason] = useState('');

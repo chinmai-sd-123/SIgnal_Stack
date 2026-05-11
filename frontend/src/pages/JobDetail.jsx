@@ -6,7 +6,7 @@ import {
     Send, Copy, ExternalLink, UserPlus, X, RefreshCw,
     Github, Linkedin, FileText, Code, Pencil
 } from 'lucide-react';
-import { getJob, getJobOutcomes, deleteJob, finalizeShortlist, archiveJob, createInvite, getJobInvites, deleteInvite, deleteSubmission, updateSubmission } from '../api';
+import { getJob, getJobOutcomes, deleteJob, createInvite, getJobInvites, deleteInvite, deleteSubmission, updateSubmission } from '../api';
 
 export default function JobDetail() {
     const { jobId } = useParams();

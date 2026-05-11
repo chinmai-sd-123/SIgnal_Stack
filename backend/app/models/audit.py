@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, JSON, DateTime
 from app.config.database import Base
-import datetime
+from app.utils.time_utils import utc_now
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
@@ -10,4 +10,4 @@ class AuditLog(Base):
     entity_id = Column(String)
     action = Column(String)
     details_json = Column(JSON)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)

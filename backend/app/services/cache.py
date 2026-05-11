@@ -10,9 +10,11 @@ Provides caching for:
 
 import json
 import hashlib
-from typing import Any, Optional, Dict
-from datetime import timedelta
+import logging
 import os
+import time
+from functools import wraps
+from typing import Any, Optional, Dict
 
 # Try to import redis, fall back to in-memory cache if not available
 try:
@@ -20,6 +22,9 @@ try:
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
+
+
+logger = logging.getLogger(__name__)
 
 
 class CacheService:
@@ -32,13 +37,13 @@ class CacheService:
     
     def __init__(self):
         self.redis_client = None
-        self._memory_cache: Dict[str, Any] = {}
+        self._memory_cache: Dict[str, Dict[str, Any]] = {}
         self._connect()
     
     def _connect(self):
         """Attempt to connect to Redis."""
         if not REDIS_AVAILABLE:
-            print("Redis not installed, using in-memory cache")
+            logger.warning("Redis not installed, using in-memory cache")
             return
         
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -52,9 +57,9 @@ class CacheService:
             )
             # Test connection
             self.redis_client.ping()
-            print(f"Connected to Redis at {redis_url}")
+            logger.info("Connected to Redis at %s", redis_url)
         except Exception as e:
-            print(f"Redis connection failed: {e}, using in-memory cache")
+            logger.warning("Redis connection failed, using in-memory cache: %s", e)
             self.redis_client = None
     
     def _make_key(self, prefix: str, *args) -> str:
@@ -65,6 +70,16 @@ class CacheService:
     def _hash_key(self, data: str) -> str:
         """Create a hash for large keys."""
         return hashlib.sha256(data.encode()).hexdigest()[:16]
+
+    def _get_memory_value(self, key: str) -> Optional[Any]:
+        item = self._memory_cache.get(key)
+        if not item:
+            return None
+        expires_at = item.get("expires_at")
+        if expires_at is not None and expires_at < time.time():
+            self._memory_cache.pop(key, None)
+            return None
+        return item.get("value")
     
     def get(self, key: str) -> Optional[Any]:
         """Get a value from cache."""
@@ -74,9 +89,9 @@ class CacheService:
                 if value:
                     return json.loads(value)
             else:
-                return self._memory_cache.get(key)
+                return self._get_memory_value(key)
         except Exception as e:
-            print(f"Cache get error: {e}")
+            logger.warning("Cache get error: %s", e)
         return None
     
     def set(self, key: str, value: Any, ttl_seconds: int = 3600) -> bool:
@@ -86,10 +101,11 @@ class CacheService:
             if self.redis_client:
                 self.redis_client.setex(key, ttl_seconds, serialized)
             else:
-                self._memory_cache[key] = value
+                expires_at = time.time() + max(1, ttl_seconds)
+                self._memory_cache[key] = {"value": value, "expires_at": expires_at}
             return True
         except Exception as e:
-            print(f"Cache set error: {e}")
+            logger.warning("Cache set error: %s", e)
             return False
     
     def delete(self, key: str) -> bool:
@@ -101,7 +117,7 @@ class CacheService:
                 self._memory_cache.pop(key, None)
             return True
         except Exception as e:
-            print(f"Cache delete error: {e}")
+            logger.warning("Cache delete error: %s", e)
             return False
     
     def clear_prefix(self, prefix: str) -> int:
@@ -123,7 +139,7 @@ class CacheService:
                     del self._memory_cache[k]
                     count += 1
         except Exception as e:
-            print(f"Cache clear error: {e}")
+            logger.warning("Cache clear error: %s", e)
         return count
 
     # Convenience methods for specific cache types
@@ -157,6 +173,11 @@ class CacheService:
     def get_llm_response(self, prompt_hash: str) -> Optional[Dict]:
         """Get cached LLM response."""
         return self.get(self._make_key("llm", prompt_hash))
+
+    def get_llm_response_by_prompt(self, prompt: str) -> Optional[Any]:
+        """Get cached LLM response by raw prompt."""
+        prompt_hash = self._hash_key(prompt)
+        return self.get(self._make_key("llm", prompt_hash))
     
     def set_llm_response(self, prompt: str, response: Dict, ttl: int = 3600) -> bool:
         """Cache LLM response (1h default)."""
@@ -178,6 +199,7 @@ def cached(prefix: str, ttl_seconds: int = 3600, key_args: list = None):
             ...
     """
     def decorator(func):
+        @wraps(func)
         def wrapper(*args, **kwargs):
             # Build cache key from specified args
             if key_args:

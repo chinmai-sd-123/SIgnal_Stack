@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, ForeignKey, Float, DateTime, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.config.database import Base
-import datetime
+from app.utils.time_utils import utc_now
 
 
 class JobCandidate(Base):
@@ -21,7 +21,7 @@ class JobCandidate(Base):
     outcome_coverage = Column(Float, nullable=True)  # Percentage of outcomes covered
     
     # Metadata
-    applied_at = Column(DateTime, default=datetime.datetime.utcnow)
+    applied_at = Column(DateTime, default=utc_now)
     evaluated_at = Column(DateTime, nullable=True)
     shortlisted_at = Column(DateTime, nullable=True)
     

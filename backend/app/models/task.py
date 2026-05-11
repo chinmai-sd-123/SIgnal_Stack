@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, Float, Integer, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.config.database import Base
-import datetime
+from app.utils.time_utils import utc_now
 
 class Task(Base):
     __tablename__ = "tasks"
@@ -23,7 +23,7 @@ class Task(Base):
     weight = Column(Float, nullable=False)      # derived deterministically
 
     version = Column(Integer, nullable=False)   # snapshot version
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 
 class TaskWeightHistory(Base):
@@ -45,4 +45,4 @@ class TaskWeightHistory(Base):
     reason = Column(String) # e.g. "Feedback from Job <UUID>"
     feedback_source_job_id = Column(String, nullable=True) # The job instance that triggered this
     
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)

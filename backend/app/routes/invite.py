@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import timedelta
 import uuid
 
 from app.config.database import get_db
@@ -8,6 +8,7 @@ from app.models.invite import Invite, InviteSubmission
 from app.models.job import Job
 from app.models.outcome import Outcome
 from app.models.proof import Proof
+from app.utils.time_utils import utc_now
 
 router = APIRouter(tags=["Invites"])
 
@@ -119,7 +120,7 @@ def create_invite(job_id: str, db: Session = Depends(get_db)):
         token=str(uuid.uuid4()),
         job_id=job_id,
         status="active",
-        expires_at=datetime.utcnow() + timedelta(days=INVITE_EXPIRY_DAYS),
+        expires_at=utc_now() + timedelta(days=INVITE_EXPIRY_DAYS),
     )
     db.add(invite)
     db.commit()
@@ -157,7 +158,7 @@ def list_invites(job_id: str, db: Session = Depends(get_db)):
             "status": inv.status,
             "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
             "created_at": inv.created_at.isoformat() if inv.created_at else None,
-            "is_expired": inv.expires_at < datetime.utcnow() if inv.expires_at else False,
+            "is_expired": inv.expires_at < utc_now() if inv.expires_at else False,
             "submission_count": len(submissions),
             "submissions": [
                 {
@@ -289,7 +290,7 @@ def get_invite(token: str, db: Session = Depends(get_db)):
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
 
-    if invite.expires_at < datetime.utcnow():
+    if invite.expires_at < utc_now():
         raise HTTPException(status_code=410, detail="This invite link has expired")
 
     if invite.status != "active":
@@ -331,7 +332,7 @@ def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
 
-    if invite.expires_at < datetime.utcnow():
+    if invite.expires_at < utc_now():
         raise HTTPException(status_code=410, detail="This invite link has expired")
 
     if invite.status != "active":

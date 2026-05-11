@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, JSON, DateTime, Integer, Boolean, Float
 from sqlalchemy.orm import relationship
 from app.config.database import Base
-import datetime
+from app.utils.time_utils import utc_now
 
 
 class Job(Base):
@@ -23,8 +23,8 @@ class Job(Base):
     total_positions = Column(Integer, default=1, nullable=False)  # Used for shortlist sizing
     shortlist_multiplier = Column(Float, default=3.0, nullable=False)  # Shortlist = positions × multiplier
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     # SEO & Job Board Fields (moved from Outcome)
     slug = Column(String, unique=True, index=True)
@@ -41,7 +41,7 @@ class Job(Base):
     city = Column(String)
     state = Column(String)
     public_url = Column(String)
-    last_refreshed_at = Column(DateTime, default=datetime.datetime.utcnow)
+    last_refreshed_at = Column(DateTime, default=utc_now)
 
     job_type = Column(String, default="Full-time")
     salary_min = Column(Integer, nullable=True)

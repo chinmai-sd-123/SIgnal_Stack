@@ -1,6 +1,11 @@
+import logging
 from typing import List
+
 from app.services.llm import OpenAILLMService as LLMService
 import app.schemas as schemas
+
+
+logger = logging.getLogger(__name__)
 
 class TaskDecomposer:
     def __init__(self, llm_service: LLMService = None):
@@ -11,7 +16,7 @@ class TaskDecomposer:
             tasks = self.llm_service.generate_tasks(description)
             return [schemas.TaskSuggestion(**t) for t in tasks]
         except Exception as e:
-            print(f"TaskDecomposer Error: {e}")
+            logger.warning("TaskDecomposer error: %s", e)
             # Absolute fallback
             return [
                 schemas.TaskSuggestion(name="Analyze Requirements", priority="High"),

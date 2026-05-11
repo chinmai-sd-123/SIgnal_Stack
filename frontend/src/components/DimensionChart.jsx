@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 
 // Custom Tick Component for Multi-line Text
-const CustomTick = ({ payload, x, y, textAnchor, stroke, radius }) => {
+const CustomTick = ({ payload, x, y, textAnchor }) => {
     const words = payload.value.split(' ');
     return (
         <g className="recharts-layer recharts-polar-angle-axis-tick">

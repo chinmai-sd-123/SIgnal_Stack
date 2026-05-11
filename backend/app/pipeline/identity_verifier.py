@@ -85,140 +85,125 @@ def fuzzy_match_name(name1: str, name2: str, threshold: float = 0.5) -> bool:
     return len(intersection) / min_tokens >= threshold
 
 
+# PATCH 1: resolve_candidate_identities — accept author_map directly, add github_login matching
+
 def resolve_candidate_identities(
     candidate: Dict[str, Any],
-    snapshot_metadata: Dict[str, Any]
+    author_map: Dict[str, Any],          # ← flat dict, NOT wrapped in snapshot_metadata
 ) -> CandidateIdentity:
     """
-    Resolve candidate identities from snapshot author data.
-    
+    Resolve candidate identities from commit author data.
+
     Args:
-        candidate: Dict containing:
-            - github_username (optional)
-            - email (optional)
-            - name (optional)
-            - emails (optional, list of known emails)
-        snapshot_metadata: Dict containing:
-            - author_map: {email: {commits, lines_added, name}}
-            - top_committers: [names...]
-    
-    Returns:
-        CandidateIdentity with resolved emails, usernames, and aliases
+        candidate: Dict with any of:
+            - name, email, emails (list), github_username
+        author_map: flat {email: {commits, lines_added, name, github_login}}
     """
     candidate_emails: Set[str] = set()
     usernames: Set[str] = set()
     name_aliases: Set[str] = set()
     matched_emails: Set[str] = set()
-    
-    # Extract candidate info
-    candidate_name = candidate.get("name", "")
-    candidate_email = candidate.get("email", "")
+
+    candidate_name     = candidate.get("name", "")
+    candidate_email    = candidate.get("email", "") or candidate.get("candidate_email", "")
     candidate_username = candidate.get("github_username", "")
     candidate_known_emails = set(candidate.get("emails", []))
-    
-    # Add known emails
+
     if candidate_email:
         candidate_emails.add(candidate_email.lower())
     candidate_emails.update(e.lower() for e in candidate_known_emails)
-    
-    # Add username variants
+
     if candidate_username:
         usernames.add(candidate_username.lower())
-        # Common noreply pattern
         candidate_emails.add(f"{candidate_username.lower()}@users.noreply.github.com")
-    
-    # Add name aliases
+
     if candidate_name:
         name_aliases.add(normalize_name(candidate_name))
-    
-    # Extract from snapshot author_map
-    author_map = snapshot_metadata.get("author_map", {})
-    
+
     for email, author_data in author_map.items():
         email_lower = email.lower()
-        author_name = author_data.get("name", "")
-        
-        # Direct email match
+        author_name  = author_data.get("name", "")
+        github_login = author_data.get("github_login", "").lower()
+
+        # ── 1. Direct email match ─────────────────────────────────────────
         if email_lower in candidate_emails:
             matched_emails.add(email_lower)
             continue
-        
-        # Check noreply email for username match
+
+        # ── 2. GitHub login match (most reliable for web-UI commits) ──────
+        if github_login and github_login in usernames:
+            matched_emails.add(email_lower)
+            candidate_emails.add(email_lower)
+            continue
+
+        # ── 3. Noreply email → username ───────────────────────────────────
         noreply_username = extract_github_username_from_noreply(email_lower)
         if noreply_username and noreply_username in usernames:
             matched_emails.add(email_lower)
             candidate_emails.add(email_lower)
             continue
-        
-        # Fuzzy name match
+
+        # ── 4. Email prefix matches username ──────────────────────────────
+        email_prefix = re.sub(r'\d+$', '', email_lower.split('@')[0])
+        if email_prefix and email_prefix in usernames:
+            matched_emails.add(email_lower)
+            candidate_emails.add(email_lower)
+            continue
+
+        # ── 5. Fuzzy name match (last resort) ─────────────────────────────
         if candidate_name and author_name:
             if fuzzy_match_name(candidate_name, author_name):
                 matched_emails.add(email_lower)
                 candidate_emails.add(email_lower)
                 name_aliases.add(normalize_name(author_name))
-                continue
-        
-        # Check if email prefix matches username
-        email_prefix = email_lower.split('@')[0]
-        # Remove common suffixes like numbers
-        clean_prefix = re.sub(r'\d+$', '', email_prefix)
-        if clean_prefix and clean_prefix in usernames:
-            matched_emails.add(email_lower)
-            candidate_emails.add(email_lower)
-    
+
     return CandidateIdentity(
         candidate_emails=candidate_emails,
         usernames=usernames,
         name_aliases=name_aliases,
-        matched_emails=matched_emails
+        matched_emails=matched_emails,
     )
 
 
+# PATCH 2: calculate_authorship_from_identity — use commits-only when lines unavailable
+
 def calculate_authorship_from_identity(
     identity: CandidateIdentity,
-    author_map: Dict[str, Any]
+    author_map: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """
-    Calculate authorship statistics based on resolved identity.
-    
-    Returns:
-        Dict with:
-            - authorship_fraction: float 0..1
-            - candidate_commits: int
-            - total_commits: int
-            - candidate_lines: int
-            - total_lines: int
-            - matched_emails: list
-    """
     total_commits = 0
-    total_lines = 0
+    total_lines   = 0
     candidate_commits = 0
-    candidate_lines = 0
-    
-    matched_authors = []
-    
+    candidate_lines   = 0
+    matched_authors   = []
+
     for email, data in author_map.items():
         commits = data.get("commits", 0)
-        lines = data.get("lines_added", 0)
+        lines   = data.get("lines_added", 0)
         total_commits += commits
-        total_lines += lines
-        
+        total_lines   += lines
+
         if email.lower() in identity.candidate_emails or email.lower() in identity.matched_emails:
             candidate_commits += commits
-            candidate_lines += lines
+            candidate_lines   += lines
             matched_authors.append(email)
-    
+
     authorship_by_commits = candidate_commits / total_commits if total_commits > 0 else 0.0
-    authorship_by_lines = candidate_lines / total_lines if total_lines > 0 else 0.0
-    
-    # Use average of commit and line authorship
-    authorship_fraction = (authorship_by_commits + authorship_by_lines) / 2
-    
+
+    # Only blend line-based authorship when lines data is actually present.
+    # The GitHub Commits list API doesn't return per-commit line stats,
+    # so lines_added is often 0 — averaging with 0 would silently halve every score.
+    if total_lines > 0:
+        authorship_by_lines   = candidate_lines / total_lines
+        authorship_fraction   = (authorship_by_commits + authorship_by_lines) / 2
+    else:
+        authorship_fraction   = authorship_by_commits
+
     return {
         "authorship_fraction": round(authorship_fraction, 4),
-        "candidate_commits": candidate_commits,
-        "total_commits": total_commits,
-        "candidate_lines": candidate_lines,
-        "total_lines": total_lines,
-        "matched_emails": matched_authors
+        "candidate_commits":   candidate_commits,
+        "total_commits":       total_commits,
+        "candidate_lines":     candidate_lines,
+        "total_lines":         total_lines,
+        "matched_emails":      matched_authors,
     }

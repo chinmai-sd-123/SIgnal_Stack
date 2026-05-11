@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, JSON, Float, DateTime, ForeignKey
 from app.config.database import Base
-import datetime
+from app.utils.time_utils import utc_now
 
 class SignalWeight(Base):
     __tablename__ = "signal_weights"
@@ -9,7 +9,7 @@ class SignalWeight(Base):
     signal_name = Column(String, index=True)
     task_id = Column(String, nullable=True) # Context specific
     weight = Column(Float)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now)
 
 class Feedback(Base):
     __tablename__ = "feedback"
@@ -19,4 +19,4 @@ class Feedback(Base):
     job_id = Column(String)
     result = Column(String) # success | failure
     metrics_json = Column(JSON)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)

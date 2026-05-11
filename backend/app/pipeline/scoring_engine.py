@@ -4,17 +4,17 @@ Scoring Engine Module.
 Implements deterministic scoring per task with:
 - Signal weight loading
 - Raw score computation: Σ(signal * weight)
-- Normalization
-- Authorship capping (if authorship < 0.2, cap score at 0.2)
+- Normalization against ALL defined weights (not just present ones)
+- Authorship capping (only if authorship was explicitly computed and < 0.2)
+- Fork hard-cap (is_fork=1 and fork_is_unmodified=1 → cap at 0.3)
 - Work allocation generation
 """
 
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, asdict
+from typing import Dict, Any, List, Optional, Tuple
+from dataclasses import dataclass, asdict, field
 from sqlalchemy.orm import Session
 
 from app.models.feedback import SignalWeight
-from app.models.snapshot import SignalWeightHistory
 
 
 @dataclass
@@ -26,198 +26,188 @@ class ScoringResult:
     work_allocation: float
     confidence: float
     risk_flags: List[str]
-    score_breakdown: Dict[str, float]
-    
+    score_breakdown: Dict[str, Any]
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
 
 # Default signal weights (used if not in database)
 DEFAULT_WEIGHTS = {
-    "authorship_fraction": 0.25,
-    "tests_present": 0.15,
-    "ci_present": 0.10,
-    "dockerfile_present": 0.10,
-    "schema_present": 0.10,
+    "authorship_fraction":   0.25,
+    "tests_present":         0.15,
+    "ci_cd_present":         0.10,   # evaluator uses ci_cd_present; keep alias
+    "ci_present":            0.10,   # deterministic_signals uses ci_present
+    "deployment_ready":      0.10,
+    "dockerfile_present":    0.10,
+    "migrations_present":    0.08,
+    "schema_present":        0.08,
     "rate_limiting_present": 0.05,
-    "readme_quality_score": 0.10,
-    # Legacy signals for backward compatibility
-    "valid_repo": 0.05,
-    "ml_model_present": 0.05,
-    "deployment_ready": 0.05,
+    "readme_quality_score":  0.07,
+    # Legacy / supplementary
+    "valid_repo":            0.02,
+    "ml_model_present":      0.03,
+    "ml_libraries":          0.02,
+    "frontend_present":      0.02,
+    "static_assets":         0.01,
 }
 
-# Minimum authorship threshold
+# Sum of all default weights — used as normalization denominator
+_DEFAULT_WEIGHT_SUM = sum(DEFAULT_WEIGHTS.values())
+
 AUTHORSHIP_CAP_THRESHOLD = 0.2
 MAX_SCORE_WITHOUT_AUTHORSHIP = 0.2
+FORK_UNMODIFIED_CAP = 0.3
 
 
 def load_signal_weights(db: Session) -> Dict[str, float]:
-    """
-    Load signal weights from database.
-    Falls back to defaults if not configured.
-    """
+    """Load signal weights from DB, falling back to defaults."""
     weights = dict(DEFAULT_WEIGHTS)
-    
     try:
         db_weights = db.query(SignalWeight).all()
         for w in db_weights:
             weights[w.signal_name] = w.weight
     except Exception:
-        pass  # Use defaults if DB query fails
-    
+        pass
     return weights
 
 
+def _extract_value(signal_data: Any) -> float:
+    """
+    Safely extract a float value from either:
+      - a flat float/int  (signals_map from extract_signals)
+      - a structured dict {value: float, evidence: ...}  (DeterministicSignalExtractor)
+    """
+    if isinstance(signal_data, dict):
+        return float(signal_data.get("value", 0.0))
+    if isinstance(signal_data, (int, float)):
+        return float(signal_data)
+    return 0.0
+
+
 def compute_raw_score(
-    signals: Dict[str, Dict[str, Any]],
-    weights: Dict[str, float]
-) -> tuple[float, Dict[str, float]]:
+    signals: Dict[str, Any],
+    weights: Dict[str, float],
+) -> Tuple[float, Dict[str, Any]]:
     """
     Compute raw weighted score.
-    
-    Args:
-        signals: {signal_name: {name, value, evidence}}
-        weights: {signal_name: weight}
-    
-    Returns:
-        (raw_score, score_breakdown)
+
+    Normalises against the sum of ALL defined weights, not just the
+    weights of signals that happen to be present — this prevents score
+    inflation for candidates that only have a few signals.
     """
     total_score = 0.0
-    breakdown = {}
-    
+    breakdown: Dict[str, Any] = {}
+
     for signal_name, signal_data in signals.items():
-        val_raw = signal_data.get("value", 0.0) if isinstance(signal_data, dict) else 0.0
-        # Clamp value to 1.0 to prevent score inflation > 100%
-        value = min(max(val_raw, 0.0), 1.0)
-        
+        # Skip internal/meta keys
+        if signal_name.startswith("_") or signal_name in ("fork_parent",):
+            continue
+
+        value = min(max(_extract_value(signal_data), 0.0), 1.0)
         weight = weights.get(signal_name, 0.0)
         contribution = value * weight
-        
+
         breakdown[signal_name] = {
             "value": value,
             "weight": weight,
-            "contribution": contribution
+            "contribution": round(contribution, 5),
         }
         total_score += contribution
-    
+
     return total_score, breakdown
 
 
-def normalize_score(raw_score: float, max_possible: float = 1.0) -> float:
-    """
-    Normalize score to 0-1 range.
-    """
-    if max_possible <= 0:
+def normalize_score(raw_score: float, weight_sum: float) -> float:
+    """Normalize to 0–1 against the total weight sum."""
+    if weight_sum <= 0:
         return 0.0
-    return min(max(raw_score / max_possible, 0.0), 1.0)
+    return min(max(raw_score / weight_sum, 0.0), 1.0)
 
 
 def apply_authorship_cap(
     normalized_score: float,
-    authorship_fraction: float
-) -> tuple[float, List[str]]:
+    signals: Dict[str, Any],
+) -> Tuple[float, List[str]]:
     """
-    Apply authorship-based capping.
-    
-    If authorship < 0.2, cap the final score at 0.2.
-    
-    Returns:
-        (capped_score, risk_flags)
-    """
-    risk_flags = []
-    
-    if authorship_fraction < AUTHORSHIP_CAP_THRESHOLD:
-        risk_flags.append("low_authorship")
-        capped_score = min(normalized_score, MAX_SCORE_WITHOUT_AUTHORSHIP)
-        return capped_score, risk_flags
-    
-    return normalized_score, risk_flags
+    Apply authorship-based cap only when authorship was explicitly computed.
 
+    If authorship_fraction is absent (key missing or value == 0.0 AND
+    the key was never set), we skip the cap rather than penalising
+    candidates whose email we simply didn't have.
 
-def compute_work_allocation(capped_score: float) -> float:
+    The fork-unmodified hard cap is also applied here.
     """
-    Compute recommended work allocation percentage.
-    
-    Higher scores = more work allocation (in multi-candidate scenarios).
-    """
-    # Simple linear mapping for now
-    # Could be enhanced with more sophisticated allocation algorithms
-    return round(capped_score * 100, 2)
+    risk_flags: List[str] = []
+    capped = normalized_score
+
+    # ── Fork cap ─────────────────────────────────────────────────────────────
+    is_fork = _extract_value(signals.get("is_fork", 0.0)) > 0
+    fork_unmodified = _extract_value(signals.get("fork_is_unmodified", 0.0)) > 0
+    if is_fork and fork_unmodified:
+        risk_flags.append("fork_unmodified")
+        capped = min(capped, FORK_UNMODIFIED_CAP)
+
+    # ── Authorship cap ───────────────────────────────────────────────────────
+    # Only cap when the key is explicitly present (i.e. the pipeline ran the
+    # authorship extractor and got a real answer, even if that answer is low).
+    if "authorship_fraction" in signals:
+        authorship_fraction = _extract_value(signals["authorship_fraction"])
+        if authorship_fraction < AUTHORSHIP_CAP_THRESHOLD:
+            risk_flags.append("low_authorship")
+            capped = min(capped, MAX_SCORE_WITHOUT_AUTHORSHIP)
+
+    return capped, risk_flags
 
 
 def compute_confidence(
-    signals: Dict[str, Dict[str, Any]],
-    weights: Dict[str, float]
+    signals: Dict[str, Any],
+    weights: Dict[str, float],
 ) -> float:
     """
-    Compute confidence score based on signal coverage.
-    
-    High confidence = more signals present with evidence.
+    Confidence = fraction of total defined weight that is covered by
+    signals with a value > 0. High coverage → high confidence.
     """
-    present_signals = 0
-    total_weight = 0.0
+    total_defined_weight = sum(weights.values())
     covered_weight = 0.0
-    
+
     for signal_name, signal_data in signals.items():
+        if signal_name.startswith("_"):
+            continue
         weight = weights.get(signal_name, 0.0)
-        if weight > 0:
-            total_weight += weight
-            value = signal_data.get("value", 0.0) if isinstance(signal_data, dict) else 0.0
-            if value > 0:
-                present_signals += 1
-                covered_weight += weight
-    
-    if total_weight > 0:
-        return round(covered_weight / total_weight, 2)
+        if weight > 0 and _extract_value(signal_data) > 0:
+            covered_weight += weight
+
+    if total_defined_weight > 0:
+        return round(covered_weight / total_defined_weight, 3)
     return 0.0
 
 
 def score_candidate(
-    signals: Dict[str, Dict[str, Any]],
+    signals: Dict[str, Any],
     db: Session = None,
-    weights: Dict[str, float] = None
+    weights: Dict[str, float] = None,
 ) -> ScoringResult:
     """
     Full scoring pipeline for a candidate.
-    
-    Args:
-        signals: Dictionary of signals (from deterministic_signals module)
-        db: Database session for loading weights
-        weights: Optional pre-loaded weights (overrides DB)
-    
-    Returns:
-        ScoringResult with all scoring details
+
+    Accepts signals in either flat format {name: float} or structured
+    format {name: {value: float, evidence: ...}}.
     """
-    # Load weights
     if weights is None:
-        if db:
-            weights = load_signal_weights(db)
-        else:
-            weights = DEFAULT_WEIGHTS
-    
-    # Compute raw score
+        weights = load_signal_weights(db) if db else dict(DEFAULT_WEIGHTS)
+
     raw_score, breakdown = compute_raw_score(signals, weights)
-    
-    # Calculate max possible score
-    max_possible = sum(weights.get(s, 0.0) for s in signals.keys())
-    
-    # Normalize
-    normalized_score = normalize_score(raw_score, max_possible)
-    
-    # Get authorship fraction for capping
-    authorship_data = signals.get("authorship_fraction", {})
-    authorship_fraction = authorship_data.get("value", 0.0) if isinstance(authorship_data, dict) else 0.0
-    
-    # Apply authorship cap
-    capped_score, risk_flags = apply_authorship_cap(normalized_score, authorship_fraction)
-    
-    # Compute work allocation
-    work_allocation = compute_work_allocation(capped_score)
-    
-    # Compute confidence
+
+    # Normalise against the full weight universe, not just present signals
+    weight_sum = sum(weights.values())
+    normalized_score = normalize_score(raw_score, weight_sum)
+
+    capped_score, risk_flags = apply_authorship_cap(normalized_score, signals)
+
+    work_allocation = round(capped_score * 100, 2)
     confidence = compute_confidence(signals, weights)
-    
+
     return ScoringResult(
         raw_score=round(raw_score, 4),
         normalized_score=round(normalized_score, 4),
@@ -225,23 +215,23 @@ def score_candidate(
         work_allocation=work_allocation,
         confidence=confidence,
         risk_flags=risk_flags,
-        score_breakdown=breakdown
+        score_breakdown=breakdown,
     )
 
 
 def generate_evaluation_trace(
-    signals: Dict[str, Dict[str, Any]],
+    signals: Dict[str, Any],
     scoring_result: ScoringResult,
-    metadata: Dict[str, Any] = None
+    metadata: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
-    """
-    Generate complete evaluation trace for audit.
-    
-    This is stored in evaluations.evaluation_json for full reproducibility.
-    """
+    """Generate full evaluation trace for audit storage."""
     return {
-        "version": "1.0",
-        "signals": signals,
+        "version": "1.1",
+        "signals": {
+            k: (_extract_value(v) if not isinstance(v, dict) or "value" not in v else v)
+            for k, v in signals.items()
+            if not k.startswith("_")
+        },
         "scoring": scoring_result.to_dict(),
         "metadata": metadata or {},
     }

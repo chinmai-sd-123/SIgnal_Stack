@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Plus, Trash2, CheckCircle, Sparkles, RefreshCw, ArrowLeft, X } from 'lucide-react';
-import { createOutcome, suggestTasks, getJob, createJob, getOutcomeTemplates } from '../api';
+import { createOutcome, suggestTasks, getJob, createJob } from '../api';
 import TemplateSelectionModal from '../components/TemplateSelectionModal';
 
 export default function OutcomeCreateMultiple() {
@@ -11,15 +11,7 @@ export default function OutcomeCreateMultiple() {
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(null); // Index of outcome being generated
   const [job, setJob] = useState(null);
-  const [templates, setTemplates] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
-
-  // Load templates for the dropdown
-  useEffect(() => {
-    getOutcomeTemplates()
-      .then(data => setTemplates(data))
-      .catch(err => console.error("Failed to load templates", err));
-  }, []);
 
   // Support for template-based initialization
   const template = location.state?.template;

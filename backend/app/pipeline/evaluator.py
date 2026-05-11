@@ -1,18 +1,35 @@
+import logging
 from typing import List, Dict
+
+from app.models import feedback
 import app.schemas as schemas
 from app.pipeline.matcher import Matcher
 from app.pipeline.allocator import Allocator
 from app.pipeline.signal_extractor import SignalExtractor
 from app.pipeline.cost_guard import validate_eligibility, should_skip_llm, create_fallback_evaluation
-from app.services.leetcode import LeetCodeService
+from app.pipeline.scoring_engine import score_candidate
 
+
+logger = logging.getLogger(__name__)
+
+def _avg_dimensions(summaries: List) -> Dict:
+    """Average dimension scores across all evaluated candidates."""
+    dim_totals = {}
+    count = 0
+    for s in summaries:
+        if s.dimensions:
+            count += 1
+            for k, v in s.dimensions.items():
+                dim_totals[k] = dim_totals.get(k, 0.0) + v
+    if count == 0:
+        return None
+    return {k: round(v / count, 2) for k, v in dim_totals.items()}
 
 class Evaluator:
     def __init__(self):
         self.matcher = Matcher()
         self.allocator = Allocator()
         self.extractor = SignalExtractor()
-        self.leetcode_service = LeetCodeService()
 
     def evaluate(self, outcome: schemas.OutcomeCreate, proofs: List[schemas.ProofCreate], signals_map: Dict[str, Dict]) -> schemas.EvaluationResponse:
         """
@@ -58,7 +75,7 @@ class Evaluator:
                 
                 # Skip candidates without evidence
                 if not repo_url and not artifact_link:
-                    print(f"DEBUG: Skipping {cand_id} - No evidence provided.")
+                    logger.debug("Skipping %s - No evidence provided.", cand_id)
                     continue
                 
                 # Safe Clean URL for display
@@ -67,7 +84,7 @@ class Evaluator:
                 if clean_repo_url.endswith('.git'):
                     clean_repo_url = clean_repo_url[:-4]
 
-                print(f"DEBUG: Extracting evidence for {task.name}. Candidate: {cand_id}")
+                logger.debug("Extracting evidence for %s. Candidate: %s", task.name, cand_id)
 
                 # Extract evidence specific to this task
                 task_evidence = self.extractor.extract_evidence(
@@ -76,25 +93,38 @@ class Evaluator:
                     context=context_desc,
                     artifact_link=artifact_link
                 )
-                print(f"DEBUG: Evidence found: {len(task_evidence)}")
-                
+                logger.debug("Evidence found: %s", len(task_evidence))
+                task_short = task.name[:30].replace(' ', '_') if task.name else 'general'
                 # GitHub-specific checks
                 if repo_url and "github.com" in repo_url:
                     # Forensic Authorship Check (Task-Specific)
-                    authorship_evidence = self.extractor.extract_authorship_signals(repo_url, cand_id, task.name)
+                    authorship_evidence = self.extractor.extract_authorship_signals(
+                        repo_url,
+                        cand_id,
+                        task.name,
+                        candidate_info=proof.payload,                              # ← identity fields
+                        cached_author_map=signals_map.get(cand_id, {}).get("_author_map"),  # ← skip re-fetch
+                    )
                     task_evidence.append(authorship_evidence)
                     
                     # Inject Phase 1 Signals (Heuristic Project Health)
                     cand_signals = signals_map.get(cand_id, {})
                     if cand_signals:
-                        task_short = task.name[:30].replace(' ', '_') if task.name else 'general'
                         sig_snippet = f"Task: {task.name}\n\nProject Health Signals (Phase 1 Analysis):\n"
-                        sig_keys = ["tests_present", "ci_cd_present", "deployment_ready", "ml_model_present", "commit_count", "unique_authors"]
+                        sig_keys = [
+                            "tests_present", "ci_cd_present", "deployment_ready",
+                            "ml_model_present", "commit_count", "unique_authors",
+                            "recent_activity_score", "is_fork", "fork_is_unmodified",
+                            "readme_quality_score", "rate_limiting_present",
+                        ]
                         for k in sig_keys:
                             val = cand_signals.get(k, 0)
                             label = k.replace('_', ' ').title()
-                            status = "YES" if val > 0 else "NO"
-                            if isinstance(val, int) and val > 1: status = str(val)
+                            # Boolean signals → YES/NO; numeric signals → their value
+                            if k in ("commit_count", "unique_authors", "recent_activity_score", "readme_quality_score"):
+                                status = str(round(val, 3)) if isinstance(val, float) else str(val)
+                            else:
+                                status = "YES" if val > 0 else "NO"
                             sig_snippet += f"- {label}: {status}\n"
                         
                         task_evidence.append(schemas.Evidence(
@@ -104,27 +134,10 @@ class Evaluator:
                             source_url=f"{clean_repo_url}#signals"
                         ))
 
-                    # LeetCode Stats Injection
-                    leetcode_user = proof.payload.get("leetcode_username")
-                    if leetcode_user:
-                        stats = self.leetcode_service.fetch_stats(leetcode_user)
-                        if "error" not in stats:
-                            stats_snippet = f"LeetCode Profile: {leetcode_user}\n"
-                            stats_snippet += f"Total Solved: {stats.get('total_solved')} (Easy: {stats.get('easy_solved')}, Med: {stats.get('medium_solved')}, Hard: {stats.get('hard_solved')})\n"
-                            stats_snippet += f"Acceptance Rate: {stats.get('acceptance_rate')}%\n"
-                            stats_snippet += f"Ranking: {stats.get('ranking')}"
-                            
-                            task_evidence.append(schemas.Evidence(
-                                type="leetcode_stats",
-                                ref="LEETCODE",
-                                snippet=stats_snippet,
-                                source_url=f"https://leetcode.com/{leetcode_user}"
-                            ))
-
                 # 2. LLM Interpretation
                 # Sort evidence for deterministic LLM input
                 task_evidence.sort(key=lambda e: e.ref.lower())
-                evidence_dicts = [e.dict() for e in task_evidence]
+                evidence_dicts = [e.model_dump() for e in task_evidence]
                 interpretation = llm.interpret_signals(
                     task.description if hasattr(task, 'description') else task.name, 
                     evidence_dicts,
@@ -201,20 +214,18 @@ class Evaluator:
         # Calculate overall fit score (Weighted Average)
         total_fit = 0.0
         total_possible_weight = 0.0
-        
+        all_risk_flags: List[str] = []
+
         for alloc in allocations:
             task_obj = next((t for t in outcome.tasks if t.name == alloc.task_title), None)
             weight = task_obj.weight if task_obj else 0.0
-            
-            # Sum up contributions
             total_fit += (alloc.confidence * weight)
             total_possible_weight += weight
 
-        # NORMALIZE: Ensure score is relative to total weight sum
         if total_possible_weight > 0:
-            final_score = total_fit / total_possible_weight
+            raw_final = total_fit / total_possible_weight
         else:
-            final_score = 0.0
+            raw_final = 0.0
 
         # NEW: Build candidate summaries
         candidate_summaries = []
@@ -250,14 +261,26 @@ class Evaluator:
         # Sort summaries by overall_score descending
         candidate_summaries.sort(key=lambda x: x.overall_score, reverse=True)
 
+        # Run the top candidate's signals through the scoring engine for
+        # authoritative capping + risk flags, then blend with LLM scores.
+        top_candidate_id = candidate_summaries[0].candidate_id if candidate_summaries else None
+        if top_candidate_id and top_candidate_id in signals_map:
+            top_signals = signals_map[top_candidate_id]
+            scoring = score_candidate(top_signals)
+            all_risk_flags = scoring.risk_flags
+            # Blend: 60% task-weighted LLM score, 40% deterministic scoring engine
+            final_score = round(raw_final * 0.6 + scoring.capped_score * 0.4, 3)
+        else:
+            final_score = round(raw_final, 3)
+
         return schemas.EvaluationResponse(
             job_id=outcome.id,
             job_title=None,  # Injected by route handler
             fit_score=round(final_score, 2),
             work_allocation=allocations,
             global_signals_used=sorted(list(global_signals_used)),
-            risk_flags=[],
+            risk_flags=sorted(all_risk_flags) if all_risk_flags else [],
             human_action_required=True,
-            dimensions=candidate_summaries[0].dimensions if candidate_summaries else None,
+            dimensions=_avg_dimensions(candidate_summaries),
             candidate_summaries=candidate_summaries
         )

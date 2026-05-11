@@ -20,7 +20,6 @@ const EvidenceItem = ({ evidence }) => {
     let displayTitle = ref;
     let Icon = FileText;
     let iconColor = "text-gray-400";
-    let typeLabel = "File";
 
     if (ref.startsWith('CODE:') || ref.startsWith('ENTRY:')) {
         // Format: CODE:task_name:file/path.ext
@@ -29,33 +28,27 @@ const EvidenceItem = ({ evidence }) => {
         displayTitle = parts.length > 2 ? parts.slice(2).join(':') : ref;
         Icon = FileCode;
         iconColor = "text-blue-600";
-        typeLabel = "Code";
     } else if (ref.startsWith('AI_FINDING:')) {
         displayTitle = "Key Evidence (AI Analysis)";
         Icon = AlertCircle;
         iconColor = "text-amber-600";
-        typeLabel = "AI Finding";
     } else if (ref.startsWith('AUTH:') || ref === 'GIT_LOG') {
         displayTitle = "Authorship Verification";
         Icon = GitBranch;
         iconColor = "text-primary-hover";
-        typeLabel = "Git Log";
     } else if (ref.startsWith('SCAN:') || ref === 'PROJECT_SCAN') {
         displayTitle = "Project Health Scan";
         Icon = Shield;
         iconColor = "text-emerald-600";
-        typeLabel = "Health";
     } else if (ref.startsWith('REPO:') || ref === 'REPOSITORY') {
         displayTitle = "Repository Structure";
         Icon = Terminal;
         iconColor = "text-slate-600";
-        typeLabel = "Context";
     } else if (ref.includes('#L')) {
         // File path with line number like "app/main.py#L42"
         displayTitle = ref;
         Icon = FileCode;
         iconColor = "text-blue-600";
-        typeLabel = "Code";
     }
 
     // 3. VERIFIED BADGE

@@ -134,7 +134,6 @@ export default function OutcomeDashboard() {
                                 {proofs.map((proof) => {
                                     const isGit = proof.type === 'github' || (proof.payload && proof.payload.repo_url && proof.payload.repo_url.includes('github'));
                                     const link = isGit ? proof.payload.repo_url : proof.payload.artifact_link;
-                                    const label = isGit ? "GitHub Repo" : "Work Artifact";
 
                                     return (
                                         <li key={proof.id || proof.candidate_id} className="py-4 flex items-center justify-between group">

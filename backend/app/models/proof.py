@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey
 from app.config.database import Base
-import datetime
+from app.utils.time_utils import utc_now
 
 class Proof(Base):
     __tablename__ = "proofs"
@@ -13,4 +13,4 @@ class Proof(Base):
     snapshot_url = Column(String, nullable=True)
     snapshot_id = Column(String, ForeignKey("snapshots.snapshot_id"), nullable=True)  # Link to immutable snapshot
     preprocessing_checksum = Column(String, nullable=True)  # SHA256 of preprocessed input
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)

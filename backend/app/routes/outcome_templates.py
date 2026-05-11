@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.config.database import get_db
 from app.models.outcome_template import OutcomeTemplate
@@ -19,14 +19,13 @@ class OutcomeData(BaseModel):
 
 class OutcomeTemplateResponse(BaseModel):
     """Response model for outcome templates."""
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     role_name: str
     category_slug: str
     outcomes: List[dict]
     created_at: str
-    
-    class Config:
-        from_attributes = True
 
 
 @router.get("/outcome-templates", response_model=List[dict])

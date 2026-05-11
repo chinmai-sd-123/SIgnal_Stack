@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, JSON, DateTime, Integer, ForeignKey
 from sqlalchemy.orm import relationship
 from app.config.database import Base
-import datetime
+from app.utils.time_utils import utc_now
 
 
 class Outcome(Base):
@@ -29,7 +29,7 @@ class Outcome(Base):
     version = Column(Integer, default=1)
     status = Column(String, default="active")  # active | inprogress | completed
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     
     # Template System Fields
     is_template = Column(Integer, default=0)  # 1 = Template, 0 = Instance (Using Integer for SQLite bool compatibility)
@@ -47,7 +47,7 @@ class Outcome(Base):
     city = Column(String)
     state = Column(String)
     public_url = Column(String)
-    last_refreshed_at = Column(DateTime, default=datetime.datetime.utcnow)
+    last_refreshed_at = Column(DateTime, default=utc_now)
     job_type = Column(String, default="Full-time")
     salary_min = Column(Integer, nullable=True)
     salary_max = Column(Integer, nullable=True)

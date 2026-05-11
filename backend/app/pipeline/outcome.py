@@ -1,7 +1,9 @@
 from typing import List, Optional
+
 from sqlalchemy.orm import Session
 import app.models as models
 import app.schemas as schemas
+from app.config.config import config
 from app.services import crud
 
 class OutcomePipeline:
@@ -24,7 +26,7 @@ class OutcomePipeline:
         # 3. Construct Public URL (using a configurable domain in real prod, here localhost)
         # We can also store this as relative or absolute.
         # For SEO, absolute is safer for meta tags.
-        base_url = "http://localhost:3000"
+        base_url = (config.PUBLIC_BASE_URL or "http://localhost:3000").rstrip("/")
         public_url = f"{base_url}/jobs/view/{final_slug}"
         
         # 0. Check for "Save as Template" Flag (Recursive Creation)

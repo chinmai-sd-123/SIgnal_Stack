@@ -10,11 +10,11 @@ Implements bounded weight updates based on user feedback:
 
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
-from datetime import datetime
 
 from app.models.feedback import SignalWeight, Feedback
 from app.models.audit import AuditLog
 from app.models.snapshot import SignalWeightHistory
+from app.utils.time_utils import utc_now
 
 
 # Learning parameters
@@ -95,7 +95,7 @@ def update_weight(
     weight_record = query.first()
     if weight_record:
         weight_record.weight = new_weight
-        weight_record.updated_at = datetime.utcnow()
+        weight_record.updated_at = utc_now()
     else:
         weight_record = SignalWeight(
             signal_name=signal_name,
@@ -248,7 +248,7 @@ def admin_override_weight(
     weight_record = query.first()
     if weight_record:
         weight_record.weight = new_weight
-        weight_record.updated_at = datetime.utcnow()
+        weight_record.updated_at = utc_now()
     else:
         weight_record = SignalWeight(
             signal_name=signal_name,

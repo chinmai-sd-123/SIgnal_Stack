@@ -195,7 +195,8 @@ def priority_files(
 def extract_snippets(
     file_path: str,
     content: str,
-    max_length: int = 400
+    max_length: int = 400,
+    keywords: Optional[List[str]] = None
 ) -> Dict[str, str]:
     """
     Extract meaningful snippet from file content.
@@ -204,6 +205,7 @@ def extract_snippets(
         file_path: Path of the file
         content: Full file content
         max_length: Maximum snippet length
+        keywords: Optional list of keywords to anchor snippets
     
     Returns:
         Dict with file, lines, and snippet
@@ -228,17 +230,33 @@ def extract_snippets(
             "snippet": snippet[:max_length]
         }
     
-    # For code files, try to get meaningful section
+    # For code files, anchor around keyword hits when provided
+    if keywords:
+        lowered = [kw.lower() for kw in keywords]
+        for i, line in enumerate(lines, 1):
+            line_lower = line.lower()
+            if any(kw in line_lower for kw in lowered):
+                start_idx = max(0, i - 2)
+                end_idx = min(total_lines, i + 4)
+                snippet_lines = lines[start_idx:end_idx]
+                snippet = "\n".join(snippet_lines)
+                return {
+                    "file": file_path,
+                    "lines": f"{start_idx + 1}-{end_idx}",
+                    "snippet": snippet[:max_length]
+                }
+
+    # Default: return the first section
     snippet_lines = []
     char_count = 0
     start_line = 1
-    
+
     for i, line in enumerate(lines, 1):
         if char_count + len(line) > max_length:
             break
         snippet_lines.append(line)
         char_count += len(line) + 1  # +1 for newline
-    
+
     end_line = start_line + len(snippet_lines) - 1
     
     return {
@@ -274,7 +292,7 @@ def select_evidence_files(
             break
         
         content = file_contents.get(pf.path, "")
-        snippet_data = extract_snippets(pf.path, content)
+        snippet_data = extract_snippets(pf.path, content, keywords=keywords)
         
         evidence.append({
             "file": pf.path,

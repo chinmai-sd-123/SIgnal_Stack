@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 from .task import TaskResponse, TaskCreate
@@ -24,6 +24,8 @@ class OutcomeCreate(BaseModel):
     tasks: List[TaskCreate] = []
 
 class OutcomeResponse(OutcomeCreate):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     slug: Optional[str] = None
     category_slug: Optional[str] = None
@@ -40,7 +42,3 @@ class OutcomeResponse(OutcomeCreate):
     source_template_id: Optional[str] = None
     created_at: datetime
     tasks: List[TaskResponse] = []
-    
-    class Config:
-        from_attributes = True
-

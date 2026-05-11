@@ -8,10 +8,11 @@ Provides observability through:
 """
 
 from typing import Dict, Any
-from datetime import datetime
 import time
 import json
 from functools import wraps
+
+from app.utils.time_utils import utc_now
 
 
 # In-memory metrics storage (for MVP - production would use Redis or proper metrics lib)
@@ -33,7 +34,7 @@ _metrics = {
     }
 }
 
-_start_time = datetime.utcnow()
+_start_time = utc_now()
 
 
 def increment_counter(name: str, value: int = 1):
@@ -83,7 +84,7 @@ def get_histogram_stats(name: str) -> Dict[str, float]:
 
 def get_all_metrics() -> Dict[str, Any]:
     """Get all metrics in JSON format."""
-    uptime = (datetime.utcnow() - _start_time).total_seconds()
+    uptime = (utc_now() - _start_time).total_seconds()
     
     result = {
         "uptime_seconds": uptime,
@@ -145,7 +146,7 @@ def timed(metric_name: str):
 def log_metric_event(event_type: str, details: Dict[str, Any] = None):
     """Log a metric event as structured JSON."""
     log_entry = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utc_now().isoformat(),
         "event_type": event_type,
         "details": details or {}
     }

@@ -14,11 +14,15 @@ Features:
 - Optional secrets file support
 """
 
+import json
+import logging
 import os
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from dataclasses import dataclass
-import json
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -119,7 +123,7 @@ class SecretsManager:
         """Load variables from a .env file."""
         env_path = Path(path)
         if not env_path.exists():
-            print(f"Warning: .env file not found at {path}")
+            logger.warning(".env file not found at %s", path)
             return
         
         with open(env_path, 'r') as f:
@@ -238,12 +242,12 @@ secrets = SecretsManager()
 def init_secrets(env_file: str = None) -> SecretsManager:
     """Initialize secrets from environment (call from main.py startup)."""
     secrets.load(env_file)
-    print(secrets.summary())
+    logger.info(secrets.summary())
     
     validation = secrets.validate()
     if not validation["valid"]:
-        print("\n[WARNING] Missing required secrets:")
+        logger.warning("Missing required secrets:")
         for m in validation["missing"]:
-            print(f"   - Set {m['env_var']}: {m['description']}")
+            logger.warning("Set %s: %s", m["env_var"], m["description"])
     
     return secrets

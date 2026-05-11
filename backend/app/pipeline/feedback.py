@@ -1,8 +1,13 @@
+import logging
 from typing import List, Dict, Any
+
 from sqlalchemy.orm import Session
 import app.models as models
 from app.services import crud
 import app.schemas as schemas
+
+
+logger = logging.getLogger(__name__)
 
 class FeedbackLoop:
     def __init__(self, db: Session):
@@ -11,7 +16,11 @@ class FeedbackLoop:
     def process_feedback(self, feedback: models.Feedback) -> List[str]:
         changes = []
         if feedback.evaluation_id:
-            eval_id = int(feedback.evaluation_id) if feedback.evaluation_id and feedback.evaluation_id.isdigit() else None
+            eval_id = None
+            if isinstance(feedback.evaluation_id, int):
+                eval_id = feedback.evaluation_id
+            elif isinstance(feedback.evaluation_id, str) and feedback.evaluation_id.isdigit():
+                eval_id = int(feedback.evaluation_id)
             
             eval_db = None
             if eval_id:
@@ -42,7 +51,7 @@ class FeedbackLoop:
         return changes
 
     def process_task_feedback(self, request: schemas.TaskWeightFeedbackRequest) -> Dict[str, Any]:
-        print(f"DEBUG: Processing feedback for Job ID: '{request.job_id}'")
+        logger.debug("Processing feedback for Job ID: '%s'", request.job_id)
         
         # 1. Find Job & Outcome Instance
         from sqlalchemy import or_

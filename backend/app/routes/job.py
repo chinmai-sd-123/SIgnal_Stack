@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from typing import List
 import uuid
-from datetime import datetime
 
 from app.config.database import get_db
 from app.models import job as job_models
 from app.models.job_candidate import JobCandidate
 from app.schemas import job as job_schemas
 from app.utils.slug_utils import slugify
+from app.utils.time_utils import utc_now
 from app.services.shortlist_service import ShortlistService
 
 router = APIRouter()
@@ -40,8 +40,8 @@ def create_job(job_data: job_schemas.JobCreate, db: Session = Depends(get_db)):
         category_slug=slugify(job_data.category),
         subcategory_slug=slugify(job_data.subcategory) if job_data.subcategory else None,
         status="active",
-        created_at=datetime.utcnow(),
-        last_refreshed_at=datetime.utcnow()
+        created_at=utc_now(),
+        last_refreshed_at=utc_now()
     )
     
     db.add(db_job)
@@ -161,7 +161,7 @@ def update_candidate_status(
     # Update status
     job_candidate.status = new_status
     if new_status == "shortlisted":
-        job_candidate.shortlisted_at = datetime.utcnow()
+        job_candidate.shortlisted_at = utc_now()
     
     db.commit()
     db.refresh(job_candidate)
@@ -284,7 +284,7 @@ def delete_job(
     else:
         # Soft delete - archive the job
         job.status = "archived"
-        job.last_refreshed_at = datetime.utcnow()
+        job.last_refreshed_at = utc_now()
         db.commit()
         return {"message": "Job archived successfully", "job_id": job_id, "type": "archive"}
 

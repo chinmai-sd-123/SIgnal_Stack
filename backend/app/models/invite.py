@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer
 from sqlalchemy.orm import relationship
 from app.config.database import Base
-import datetime
+from app.utils.time_utils import utc_now
 import uuid
 
 
@@ -20,7 +20,7 @@ class Invite(Base):
     status = Column(String, default="active", nullable=False)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
     expires_at = Column(DateTime, nullable=False)
 
     # Relationships
@@ -53,7 +53,7 @@ class InviteSubmission(Base):
     status = Column(String, default="submitted", nullable=False)
 
     # Timestamps
-    submitted_at = Column(DateTime, default=datetime.datetime.utcnow)
+    submitted_at = Column(DateTime, default=utc_now)
 
     # Relationships
     invite = relationship("Invite", back_populates="submissions")

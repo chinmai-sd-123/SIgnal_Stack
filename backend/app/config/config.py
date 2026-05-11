@@ -1,4 +1,6 @@
+import logging
 import os
+
 from dotenv import load_dotenv
 
 # Explicitly load .env from backend root
@@ -9,9 +11,10 @@ class Config:
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+    PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:3000")
+    ENABLE_LLM_SUMMARIZATION = os.getenv("ENABLE_LLM_SUMMARIZATION", "true").lower() in ("true", "1", "yes")
 
 config = Config()
-if config.OPENAI_API_KEY:
-    print(f"[OK] Loaded OPENAI_API_KEY: {config.OPENAI_API_KEY[:5]}...")
-else:
-    print("[ERROR] OPENAI_API_KEY is missing!")
+logger = logging.getLogger(__name__)
+if not config.OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY is missing; LLM features may be disabled.")

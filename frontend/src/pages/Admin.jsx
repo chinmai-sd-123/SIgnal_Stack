@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Settings, History, FileText, AlertTriangle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -12,11 +12,7 @@ export default function Admin() {
     const [loading, setLoading] = useState(true);
     const [expandedLog, setExpandedLog] = useState(null);
 
-    useEffect(() => {
-        fetchData();
-    }, [activeTab]);
-
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true);
         try {
             if (activeTab === 'weights') {
@@ -40,7 +36,11 @@ export default function Admin() {
             console.error('Error fetching data:', error);
         }
         setLoading(false);
-    };
+    }, [activeTab]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
 
     const tabs = [
         { id: 'weights', label: 'Signal Weights', icon: Settings },

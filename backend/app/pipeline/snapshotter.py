@@ -12,12 +12,12 @@ import os
 import json
 import hashlib
 import uuid
-from datetime import datetime
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 
 from app.models.snapshot import Snapshot
 from app.config.database import get_db
+from app.utils.time_utils import utc_now
 
 
 # Base path for storing snapshots
@@ -88,7 +88,7 @@ def create_snapshot(
         "top_committers": top_committers or [],
         "total_commits": total_commits,
         "languages": languages or [],
-        "snapshot_created_at": datetime.utcnow().isoformat(),
+        "snapshot_created_at": utc_now().isoformat(),
         **(metadata or {})
     }
     

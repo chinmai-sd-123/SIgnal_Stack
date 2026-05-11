@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ServerCrash, CheckCircle2, Loader2, X } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -14,7 +14,12 @@ export default function ServerWakeupBanner() {
     const timerRef = useRef(null);
     const startTimeRef = useRef(null);
 
-    const pingBackend = async () => {
+    const stopPolling = useCallback(() => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        if (timerRef.current) clearInterval(timerRef.current);
+    }, []);
+
+    const pingBackend = useCallback(async () => {
         try {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), PING_TIMEOUT_MS);
@@ -31,12 +36,7 @@ export default function ServerWakeupBanner() {
             // Timed out or network error = still sleeping
         }
         return false;
-    };
-
-    const stopPolling = () => {
-        if (pollRef.current) clearInterval(pollRef.current);
-        if (timerRef.current) clearInterval(timerRef.current);
-    };
+    }, [stopPolling]);
 
     useEffect(() => {
         let initialCheckTimer;
@@ -70,7 +70,7 @@ export default function ServerWakeupBanner() {
             clearTimeout(initialCheckTimer);
             stopPolling();
         };
-    }, []);
+    }, [pingBackend, stopPolling]);
 
     if (status === 'hidden' || dismissed) return null;
 

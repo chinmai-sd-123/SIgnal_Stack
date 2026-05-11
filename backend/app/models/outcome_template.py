@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, JSON, DateTime
 from app.config.database import Base
-import datetime
+from app.utils.time_utils import utc_now
 import uuid
 
 
@@ -25,5 +25,5 @@ class OutcomeTemplate(Base):
     # Array of outcome objects: [{"title": "...", "description": "...", "default_weight": 0.33}]
     outcomes = Column(JSON, nullable=False)
     
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)

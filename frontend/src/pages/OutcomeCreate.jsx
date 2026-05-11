@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { Plus, Trash2, CheckCircle, Sparkles, RefreshCw, Briefcase, MapPin, ArrowLeft, FileCode } from 'lucide-react';
-import { createOutcome, suggestTasks, saveTasksBatch, getJob, getOutcomeTemplates, createJob } from '../api';
+import { Plus, Trash2, CheckCircle, Sparkles, RefreshCw, Briefcase, MapPin, ArrowLeft } from 'lucide-react';
+import { createOutcome, suggestTasks, getJob, getOutcomeTemplates, createJob } from '../api';
 import TemplateSelectionModal from '../components/TemplateSelectionModal';
 
 export default function OutcomeCreate() {
@@ -15,7 +15,6 @@ export default function OutcomeCreate() {
 
     // Initial Data from Wizard?
     const wizardJobData = location.state?.jobData;
-    const wizardTemplate = location.state?.template;
 
     // Outcome Data
     const [formData, setFormData] = useState({
