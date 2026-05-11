@@ -18,7 +18,7 @@ from app.pipeline.scoring_engine import score_candidate
 from app.pipeline.signal_extractor import SignalExtractor
 from app.services import crud
 from app.services.cache import cache
-from app.services.worker_queue import worker_queue
+from app.services.worker_queue import TaskStatus, worker_queue
 from app.utils.time_utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -145,12 +145,52 @@ def get_job_evaluation_queue_backend() -> str:
     return "redis" if _redis_available() else "memory"
 
 
-def get_job_evaluation_queue_size() -> int:
-    size = worker_queue.get_queue_size()
+def _redis_payload_job_id(item: Any) -> Optional[str]:
+    if isinstance(item, bytes):
+        item = item.decode("utf-8")
+    try:
+        payload = json.loads(item)
+    except Exception:
+        return None
+    return payload.get("job_id")
+
+
+def _count_redis_job_queue_items(job_id: Optional[str]) -> int:
+    if not _redis_available():
+        return 0
+
+    if not job_id:
+        return int(cache.redis_client.llen(REDIS_JOB_EVAL_QUEUE) or 0) + int(
+            cache.redis_client.llen(REDIS_JOB_EVAL_PROCESSING) or 0
+        )
+
+    count = 0
+    for key in (REDIS_JOB_EVAL_QUEUE, REDIS_JOB_EVAL_PROCESSING):
+        for item in cache.redis_client.lrange(key, 0, -1):
+            if _redis_payload_job_id(item) == job_id:
+                count += 1
+    return count
+
+
+def _count_memory_job_queue_items(job_id: Optional[str]) -> int:
+    if not job_id:
+        return worker_queue.get_queue_size()
+
+    task_name = f"evaluate_job:{job_id}"
+    active_statuses = {TaskStatus.PENDING, TaskStatus.RUNNING}
+    with worker_queue._lock:
+        return sum(
+            1
+            for task in worker_queue.tasks.values()
+            if task.name == task_name and task.status in active_statuses
+        )
+
+
+def get_job_evaluation_queue_size(job_id: Optional[str] = None) -> int:
+    size = _count_memory_job_queue_items(job_id)
     if _redis_available():
         try:
-            size += int(cache.redis_client.llen(REDIS_JOB_EVAL_QUEUE) or 0)
-            size += int(cache.redis_client.llen(REDIS_JOB_EVAL_PROCESSING) or 0)
+            size += _count_redis_job_queue_items(job_id)
         except Exception as exc:
             logger.warning("Could not read Redis evaluation queue size: %s", exc)
     return size
@@ -592,6 +632,8 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
         evaluations = db.query(Evaluation).filter(Evaluation.outcome_id.in_(outcome_ids)).all()
     evaluated_outcome_ids = {item.outcome_id for item in evaluations if item.evaluation_json}
 
+    job_queue_size = get_job_evaluation_queue_size(job_id)
+
     return {
         "job_id": job_id,
         "submissions_total": len(submissions),
@@ -625,6 +667,8 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
             }
             for c in evaluated[:20]
         ],
-        "queue_size": get_job_evaluation_queue_size(),
+        "queue_size": job_queue_size,
+        "queue_active": job_queue_size > 0,
+        "global_queue_size": get_job_evaluation_queue_size(),
         "queue_backend": get_job_evaluation_queue_backend(),
     }

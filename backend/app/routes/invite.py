@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from datetime import timedelta
 import uuid
@@ -107,12 +107,13 @@ def create_invite(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/jobs/{job_id}/invites")
-def list_invites(job_id: str, db: Session = Depends(get_db)):
+def list_invites(job_id: str, response: Response, db: Session = Depends(get_db)):
     """List all invites for a job with their submissions."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    response.headers["Cache-Control"] = "no-store"
     invites = db.query(Invite).filter(Invite.job_id == job_id).order_by(Invite.created_at.desc()).all()
 
     result = []

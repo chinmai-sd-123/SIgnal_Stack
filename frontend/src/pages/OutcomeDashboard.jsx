@@ -67,7 +67,7 @@ export default function OutcomeDashboard() {
 
     return (
         <div className="max-w-6xl mx-auto space-y-8 px-4 sm:px-6 lg:px-8">
-            <button onClick={() => navigate('/')} className="text-gray-500 hover:text-primary flex items-center gap-1 transition-colors">
+            <button onClick={() => navigate('/outcomes')} className="text-gray-500 hover:text-primary flex items-center gap-1 transition-colors">
                 <ArrowLeft className="w-4 h-4" /> Back to Outcomes
             </button>
 

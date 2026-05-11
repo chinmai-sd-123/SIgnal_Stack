@@ -31,10 +31,23 @@ export default function JobDetail() {
         const candidateCounts = progress.candidate_status_counts || {};
         const activeCount = Number(progress.active_count || 0);
         const queueSize = Number(progress.queue_size || 0);
+        const queueActive = Boolean(progress.queue_active);
         const queued = Number(submissionCounts.queued || candidateCounts.queued || 0);
         const evaluating = Number(submissionCounts.evaluating || candidateCounts.evaluating || 0);
-        return activeCount > 0 || queueSize > 0 || queued > 0 || evaluating > 0;
+        return activeCount > 0 || queueActive || queueSize > 0 || queued > 0 || evaluating > 0;
     }, []);
+
+    const refreshEvaluationState = useCallback(async () => {
+        const [progressData, invitesData] = await Promise.all([
+            getJobEvaluationProgress(jobId),
+            getJobInvites(jobId).catch(() => null),
+        ]);
+        setEvaluationProgress(progressData);
+        if (invitesData) {
+            setInvites(invitesData);
+        }
+        return progressData;
+    }, [jobId]);
 
     useEffect(() => {
         async function loadJob() {
@@ -63,20 +76,20 @@ export default function JobDetail() {
 
         const timer = setInterval(async () => {
             try {
-                setEvaluationProgress(await getJobEvaluationProgress(jobId));
+                await refreshEvaluationState();
             } catch (error) {
                 console.warn('Failed to refresh evaluation progress', error);
             }
         }, 5000);
 
         return () => clearInterval(timer);
-    }, [jobId, evaluationProgress, hasEvaluationActivity]);
+    }, [evaluationProgress, hasEvaluationActivity, refreshEvaluationState]);
 
     useEffect(() => {
         const refreshWhenVisible = async () => {
             if (document.visibilityState !== 'visible') return;
             try {
-                setEvaluationProgress(await getJobEvaluationProgress(jobId));
+                await refreshEvaluationState();
             } catch (error) {
                 console.warn('Failed to refresh evaluation progress after returning to page', error);
             }
@@ -89,7 +102,7 @@ export default function JobDetail() {
             window.removeEventListener('focus', refreshWhenVisible);
             document.removeEventListener('visibilitychange', refreshWhenVisible);
         };
-    }, [jobId]);
+    }, [refreshEvaluationState]);
 
     const handleGenerateInvite = async () => {
         setGeneratingInvite(true);
@@ -168,7 +181,7 @@ export default function JobDetail() {
     };
 
     const refreshEvaluationProgress = async () => {
-        setEvaluationProgress(await getJobEvaluationProgress(jobId));
+        await refreshEvaluationState();
     };
 
     const handleQueueEvaluation = async () => {

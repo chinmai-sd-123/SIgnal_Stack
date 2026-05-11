@@ -132,7 +132,10 @@ export async function queueJobEvaluation(jobId, options = {}) {
 }
 
 export async function getJobEvaluationProgress(jobId) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/evaluations/progress`);
+    const response = await fetch(`${API_URL}/jobs/${jobId}/evaluations/progress`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+    });
     if (!response.ok) throw new Error("Failed to fetch evaluation progress");
     return response.json();
 }
@@ -226,7 +229,10 @@ export async function resetDecision(jobId) {
 }
 
 export async function getEvaluations() {
-    const response = await fetch(`${API_URL}/evaluations`);
+    const response = await fetch(`${API_URL}/evaluations`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+    });
     if (!response.ok) throw new Error("Failed to fetch evaluations");
     return response.json();
 }
@@ -248,7 +254,10 @@ export async function triggerEvaluation(payload) {
 }
 
 export async function getEvaluation(jobId) {
-    const response = await fetch(`${API_URL}/plugin/status/${jobId}`);
+    const response = await fetch(`${API_URL}/plugin/status/${jobId}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+    });
     if (!response.ok) throw new Error("Failed to fetch evaluation");
     const data = await response.json();
     // Return the whole object so the UI can check status
@@ -364,7 +373,10 @@ export async function createInvite(jobId) {
 }
 
 export async function getJobInvites(jobId) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/invites`);
+    const response = await fetch(`${API_URL}/jobs/${jobId}/invites`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+    });
     if (!response.ok) throw new Error("Failed to fetch invites");
     return response.json();
 }

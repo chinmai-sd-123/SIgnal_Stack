@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session, joinedload
 from typing import List
 import uuid
@@ -214,7 +214,7 @@ def queue_job_applications_for_evaluation(
     rerun_evaluated = bool(options.get("rerun_evaluated", False))
 
     progress = get_job_evaluation_progress(db, job_id)
-    if progress.get("active_count", 0) > 0 and not rerun_evaluated:
+    if (progress.get("active_count", 0) > 0 or progress.get("queue_active")) and not rerun_evaluated:
         return {
             "job_id": job_id,
             "task_id": None,
@@ -259,11 +259,16 @@ def queue_job_applications_for_evaluation(
 
 
 @router.get("/jobs/{job_id}/evaluations/progress")
-def get_job_application_evaluation_progress(job_id: str, db: Session = Depends(get_db)):
+def get_job_application_evaluation_progress(
+    job_id: str,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     """Return stored progress for high-volume job evaluation."""
     job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    response.headers["Cache-Control"] = "no-store"
     return get_job_evaluation_progress(db, job_id)
 
 

@@ -81,12 +81,23 @@ class _FakeRedis:
     def __init__(self):
         self.items = []
         self.values = {}
+        self.lists = {}
 
     def lpush(self, key, value):
         self.items.append((key, value))
+        self.lists.setdefault(key, []).insert(0, value)
 
     def setex(self, key, ttl, value):
         self.values[key] = (ttl, value)
+
+    def llen(self, key):
+        return len(self.lists.get(key, []))
+
+    def lrange(self, key, start, end):
+        items = self.lists.get(key, [])
+        if end == -1:
+            return items[start:]
+        return items[start:end + 1]
 
 
 @pytest.mark.unit
@@ -140,6 +151,21 @@ def test_queue_job_evaluation_uses_redis_when_available(monkeypatch):
     assert task_id
     assert fake_redis.items[0][0] == bulk.REDIS_JOB_EVAL_QUEUE
     assert f"{bulk.REDIS_JOB_EVAL_TASK_PREFIX}:{task_id}" in fake_redis.values
+
+
+@pytest.mark.unit
+def test_job_evaluation_queue_size_is_scoped_to_job(monkeypatch):
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(bulk.cache, "redis_client", fake_redis)
+
+    fake_redis.lpush(bulk.REDIS_JOB_EVAL_QUEUE, '{"task_id":"task-1","job_id":"job-1"}')
+    fake_redis.lpush(bulk.REDIS_JOB_EVAL_QUEUE, '{"task_id":"task-2","job_id":"job-2"}')
+    fake_redis.lpush(bulk.REDIS_JOB_EVAL_PROCESSING, '{"task_id":"task-3","job_id":"job-1"}')
+
+    assert bulk.get_job_evaluation_queue_size("job-1") == 2
+    assert bulk.get_job_evaluation_queue_size("job-2") == 1
+    assert bulk.get_job_evaluation_queue_size("missing-job") == 0
+    assert bulk.get_job_evaluation_queue_size() == 3
 
 
 @pytest.mark.unit
