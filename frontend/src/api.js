@@ -118,6 +118,25 @@ export async function getJobOutcomes(jobId) {
     return response.json();
 }
 
+export async function queueJobEvaluation(jobId, options = {}) {
+    const response = await fetch(`${API_URL}/jobs/${jobId}/evaluations/queue`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(options),
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to queue job evaluation");
+    }
+    return response.json();
+}
+
+export async function getJobEvaluationProgress(jobId) {
+    const response = await fetch(`${API_URL}/jobs/${jobId}/evaluations/progress`);
+    if (!response.ok) throw new Error("Failed to fetch evaluation progress");
+    return response.json();
+}
+
 // === OUTCOME API ===
 export async function getOutcome(outcomeId) {
     const response = await fetch(`${API_URL}/outcomes/${outcomeId}`);

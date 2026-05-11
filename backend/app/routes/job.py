@@ -10,6 +10,11 @@ from app.schemas import job as job_schemas
 from app.utils.slug_utils import slugify
 from app.utils.time_utils import utc_now
 from app.services.shortlist_service import ShortlistService
+from app.services.bulk_evaluation_service import (
+    get_job_evaluation_progress,
+    mark_job_submissions_queued,
+    queue_job_evaluation,
+)
 
 router = APIRouter()
 
@@ -183,6 +188,83 @@ def get_shortlist(job_id: str, auto_select: bool = False, db: Session = Depends(
         auto_select=auto_select
     )
     return result
+
+
+@router.post("/jobs/{job_id}/evaluations/queue")
+def queue_job_applications_for_evaluation(
+    job_id: str,
+    options: dict = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Queue scalable evaluation for all submissions on a job.
+
+    This enqueues one batch worker task for the job, not one task per
+    candidate. The worker screens every queued submission cheaply, then
+    optionally deep-evaluates only the top N candidates.
+    """
+    job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    options = options or {}
+    deep_limit = int(options.get("deep_limit", 100))
+    candidate_limit = options.get("candidate_limit")
+    include_deep_evaluation = bool(options.get("include_deep_evaluation", True))
+    rerun_evaluated = bool(options.get("rerun_evaluated", False))
+
+    progress = get_job_evaluation_progress(db, job_id)
+    if progress.get("active_count", 0) > 0 and not rerun_evaluated:
+        return {
+            "job_id": job_id,
+            "task_id": None,
+            "queued_count": 0,
+            "deep_limit": max(0, deep_limit),
+            "include_deep_evaluation": include_deep_evaluation,
+            "message": "Job evaluation is already queued or running",
+            "progress": progress,
+        }
+
+    queued_count = mark_job_submissions_queued(
+        db,
+        job_id,
+        rerun_evaluated=rerun_evaluated,
+    )
+
+    if queued_count == 0:
+        return {
+            "job_id": job_id,
+            "task_id": None,
+            "queued_count": 0,
+            "deep_limit": max(0, deep_limit),
+            "include_deep_evaluation": include_deep_evaluation,
+            "message": "No submissions need evaluation",
+        }
+
+    task_id = queue_job_evaluation(
+        job_id,
+        deep_limit=max(0, deep_limit),
+        candidate_limit=int(candidate_limit) if candidate_limit else None,
+        include_deep_evaluation=include_deep_evaluation,
+    )
+
+    return {
+        "job_id": job_id,
+        "task_id": task_id,
+        "queued_count": queued_count,
+        "deep_limit": max(0, deep_limit),
+        "include_deep_evaluation": include_deep_evaluation,
+        "message": "Job evaluation queued",
+    }
+
+
+@router.get("/jobs/{job_id}/evaluations/progress")
+def get_job_application_evaluation_progress(job_id: str, db: Session = Depends(get_db)):
+    """Return stored progress for high-volume job evaluation."""
+    job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return get_job_evaluation_progress(db, job_id)
 
 
 @router.patch("/jobs/{job_id}/shortlist")

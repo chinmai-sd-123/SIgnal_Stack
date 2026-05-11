@@ -2,6 +2,7 @@ import pytest
 
 from app.models.invite import InviteSubmission
 from app.routes.invite import _proof_payload_for_submission
+from app.services.bulk_evaluation_service import candidate_id_for_submission
 
 
 @pytest.mark.unit
@@ -43,3 +44,15 @@ def test_invite_proof_payload_uses_resume_as_artifact_only_without_repo():
     assert payload["github_username"] == "candidate-dev"
     assert payload["repo_url"] == ""
     assert payload["artifact_link"] == "https://drive.google.com/resume"
+
+
+@pytest.mark.unit
+def test_bulk_evaluation_candidate_id_prefers_github_username():
+    submission = InviteSubmission(
+        id="sub-3",
+        candidate_name="Candidate Dev",
+        candidate_email="candidate@example.com",
+        github_username="candidate-dev",
+    )
+
+    assert candidate_id_for_submission(submission) == "candidate-dev"

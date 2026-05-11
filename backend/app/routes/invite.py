@@ -8,6 +8,7 @@ from app.models.invite import Invite, InviteSubmission
 from app.models.job import Job
 from app.models.outcome import Outcome
 from app.models.proof import Proof
+from app.services.bulk_evaluation_service import ensure_job_candidate
 from app.utils.time_utils import utc_now
 
 router = APIRouter(tags=["Invites"])
@@ -366,6 +367,7 @@ def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
     # Create Proof records for each outcome
     try:
         created = _create_proofs_for_submission(db, submission, invite.job_id)
+        ensure_job_candidate(db, invite.job_id, _get_candidate_id(submission), status="submitted")
         db.commit()
         print(f"[OK] Created {created} proof(s) for submission {submission.id}")
     except Exception as e:

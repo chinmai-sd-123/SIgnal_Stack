@@ -18,6 +18,7 @@ class CandidateScore(BaseModel):
     candidate_id: str
     score: float
     justification: str
+    evidence: Optional[List[Evidence]] = None
 
 # NEW: Summary of a candidate across all tasks
 class CandidateSummary(BaseModel):

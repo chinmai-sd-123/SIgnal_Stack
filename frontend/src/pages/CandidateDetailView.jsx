@@ -211,6 +211,7 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
                             const isWinner = alloc.recommended_candidate === candidate.candidate_id;
                             const candidateScore = alloc.top_candidates?.find(tc => tc.candidate_id === candidate.candidate_id);
                             const score = candidateScore?.score ?? alloc.confidence;
+                            const candidateEvidence = isWinner ? alloc.evidence : candidateScore?.evidence;
                             const isExpanded = expandedTask === idx;
 
                             return (
@@ -260,11 +261,11 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
                                             )}
 
                                             {/* Evidence */}
-                                            {alloc.evidence && alloc.evidence.length > 0 && (
+                                            {candidateEvidence && candidateEvidence.length > 0 && (
                                                 <div>
                                                     <h5 className="text-sm font-semibold text-gray-700 mb-3">Evidence</h5>
                                                     <div className="space-y-3">
-                                                        {alloc.evidence.map((ev, evIdx) => (
+                                                        {candidateEvidence.map((ev, evIdx) => (
                                                             <EvidenceItem key={evIdx} evidence={ev} />
                                                         ))}
                                                     </div>

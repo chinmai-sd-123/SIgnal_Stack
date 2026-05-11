@@ -272,7 +272,8 @@ class Evaluator:
                 schemas.CandidateScore(
                     candidate_id=cs['candidate_id'],
                     score=cs['score'],
-                    justification=cs['justification']
+                    justification=cs['justification'],
+                    evidence=cs.get('evidence') or []
                 )
                 for cs in task_candidate_scores[:5]  # Top 5 candidates per task
             ]

@@ -16,6 +16,7 @@ import threading
 import time
 import traceback
 import uuid
+from itertools import count
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -65,6 +66,7 @@ class WorkerQueue:
         self.running = False
         self.num_workers = num_workers
         self._lock = threading.Lock()
+        self._sequence = count()
     
     def start(self):
         """Start worker threads."""
@@ -91,7 +93,7 @@ class WorkerQueue:
             # Add poison pills to wake up workers
             for _ in self.workers:
                 try:
-                    self.task_queue.put((999, None), timeout=1)
+                    self.task_queue.put((999, next(self._sequence), None), timeout=1)
                 except queue.Full:
                     pass
             
@@ -106,10 +108,15 @@ class WorkerQueue:
         while self.running:
             try:
                 # Block with timeout to allow checking running flag
-                priority, task = self.task_queue.get(timeout=1)
+                item = self.task_queue.get(timeout=1)
             except queue.Empty:
                 continue
             try:
+                if len(item) == 2:
+                    priority, task = item
+                else:
+                    priority, _, task = item
+
                 if task is None:  # Poison pill
                     break
 
@@ -170,10 +177,12 @@ class WorkerQueue:
         with self._lock:
             self.tasks[task_id] = task
         
-        # Priority queue uses (priority, task), lower = first
+        # Priority queue uses (priority, sequence, task), lower = first.
+        # The sequence makes equal-priority tasks stable and prevents Python
+        # from trying to compare Task objects.
         # Negate priority so higher number = more urgent
         try:
-            self.task_queue.put((-priority, task), timeout=2)
+            self.task_queue.put((-priority, next(self._sequence), task), timeout=2)
         except queue.Full:
             task.status = TaskStatus.FAILED
             task.error = "Queue full. Task not enqueued."

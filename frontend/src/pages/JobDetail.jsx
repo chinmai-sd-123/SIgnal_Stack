@@ -6,7 +6,10 @@ import {
     Send, Copy, ExternalLink, UserPlus, X, RefreshCw,
     Github, Linkedin, FileText, Code, Pencil
 } from 'lucide-react';
-import { getJob, getJobOutcomes, deleteJob, createInvite, getJobInvites, deleteInvite, deleteSubmission, updateSubmission } from '../api';
+import {
+    getJob, getJobOutcomes, deleteJob, createInvite, getJobInvites, deleteInvite,
+    deleteSubmission, updateSubmission, getJobEvaluationProgress, queueJobEvaluation
+} from '../api';
 
 export default function JobDetail() {
     const { jobId } = useParams();
@@ -19,18 +22,22 @@ export default function JobDetail() {
     const [copiedToken, setCopiedToken] = useState(null);
     const [editingSub, setEditingSub] = useState(null); // submission id being edited
     const [editForm, setEditForm] = useState({});
+    const [evaluationProgress, setEvaluationProgress] = useState(null);
+    const [queueingEvaluation, setQueueingEvaluation] = useState(false);
 
     useEffect(() => {
         async function loadJob() {
             try {
-                const [jobData, outcomesData, invitesData] = await Promise.all([
+                const [jobData, outcomesData, invitesData, progressData] = await Promise.all([
                     getJob(jobId),
                     getJobOutcomes(jobId),
                     getJobInvites(jobId).catch(() => []),
+                    getJobEvaluationProgress(jobId).catch(() => null),
                 ]);
                 setJob(jobData);
                 setOutcomes(outcomesData);
                 setInvites(invitesData);
+                setEvaluationProgress(progressData);
             } catch (error) {
                 console.error("Failed to load job", error);
             } finally {
@@ -39,6 +46,20 @@ export default function JobDetail() {
         }
         loadJob();
     }, [jobId]);
+
+    useEffect(() => {
+        if (!evaluationProgress?.active_count) return undefined;
+
+        const timer = setInterval(async () => {
+            try {
+                setEvaluationProgress(await getJobEvaluationProgress(jobId));
+            } catch (error) {
+                console.warn('Failed to refresh evaluation progress', error);
+            }
+        }, 5000);
+
+        return () => clearInterval(timer);
+    }, [jobId, evaluationProgress?.active_count]);
 
     const handleGenerateInvite = async () => {
         setGeneratingInvite(true);
@@ -113,6 +134,31 @@ export default function JobDetail() {
             setEditingSub(null);
         } catch (error) {
             alert(`Failed: ${error.message}`);
+        }
+    };
+
+    const refreshEvaluationProgress = async () => {
+        setEvaluationProgress(await getJobEvaluationProgress(jobId));
+    };
+
+    const handleQueueEvaluation = async () => {
+        const totalSubmissions = invites.reduce((count, inv) => count + (inv.submissions?.length || 0), 0);
+        if (totalSubmissions === 0) {
+            alert('No candidate submissions to evaluate yet.');
+            return;
+        }
+
+        setQueueingEvaluation(true);
+        try {
+            await queueJobEvaluation(jobId, {
+                deep_limit: 100,
+                include_deep_evaluation: true,
+            });
+            await refreshEvaluationProgress();
+        } catch (error) {
+            alert(`Failed to queue evaluation: ${error.message}`);
+        } finally {
+            setQueueingEvaluation(false);
         }
     };
 
@@ -310,6 +356,55 @@ export default function JobDetail() {
                         )}
                     </button>
                 </div>
+
+                {evaluationProgress && (
+                    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <div>
+                                <h3 className="font-semibold text-gray-900">Evaluation Progress</h3>
+                                <p className="text-xs text-gray-500">
+                                    {evaluationProgress.evaluated_count || 0} evaluated from {evaluationProgress.submissions_total || 0} submissions
+                                    {evaluationProgress.queue_size ? ` - queue: ${evaluationProgress.queue_size}` : ''}
+                                </p>
+                            </div>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={refreshEvaluationProgress}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-200 transition-colors"
+                                >
+                                    <RefreshCw className="w-3.5 h-3.5" /> Refresh
+                                </button>
+                                <button
+                                    onClick={handleQueueEvaluation}
+                                    disabled={queueingEvaluation}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
+                                >
+                                    {queueingEvaluation ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                                    Evaluate Submissions
+                                </button>
+                            </div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+                            {['submitted', 'queued', 'evaluating', 'evaluated', 'failed'].map(status => (
+                                <div key={status} className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+                                    <div className="text-gray-400 capitalize">{status}</div>
+                                    <div className="font-bold text-gray-800">
+                                        {evaluationProgress.submission_status_counts?.[status] || evaluationProgress.candidate_status_counts?.[status] || 0}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        {evaluationProgress.top_candidates?.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                {evaluationProgress.top_candidates.slice(0, 5).map(candidate => (
+                                    <span key={candidate.candidate_id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary-soft text-primary-hover text-xs font-semibold">
+                                        {candidate.candidate_id}: {Math.round(candidate.score || 0)}%
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {invites.length === 0 ? (
                     <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">

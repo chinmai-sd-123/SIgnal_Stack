@@ -1,0 +1,402 @@
+import logging
+import uuid
+from collections import defaultdict
+from typing import Any, Dict, List, Optional
+
+import app.schemas as schemas
+from app.config.database import SessionLocal
+from app.models.invite import InviteSubmission
+from app.models.job import Job
+from app.models.job_candidate import JobCandidate
+from app.models.outcome import Outcome
+from app.models.proof import Proof
+from app.pipeline.evaluator import Evaluator
+from app.pipeline.scoring_engine import score_candidate
+from app.pipeline.signal_extractor import SignalExtractor
+from app.services import crud
+from app.services.worker_queue import worker_queue
+from app.utils.time_utils import utc_now
+
+logger = logging.getLogger(__name__)
+
+QUEUED_STATUSES = {"submitted", "queued", "failed"}
+ACTIVE_STATUSES = {"queued", "evaluating"}
+TERMINAL_EVALUATED_STATUSES = {"evaluated", "shortlisted", "rejected"}
+
+
+def candidate_id_for_submission(submission: InviteSubmission) -> str:
+    return submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
+
+
+def ensure_job_candidate(db, job_id: str, candidate_id: str, status: str = "submitted") -> JobCandidate:
+    candidate = db.query(JobCandidate).filter(
+        JobCandidate.job_id == job_id,
+        JobCandidate.candidate_id == candidate_id,
+    ).first()
+
+    if candidate:
+        if candidate.status in {"applied", "submitted", "failed"} and status:
+            candidate.status = status
+        return candidate
+
+    candidate = JobCandidate(
+        id=str(uuid.uuid4()),
+        job_id=job_id,
+        candidate_id=candidate_id,
+        status=status,
+        applied_at=utc_now(),
+    )
+    db.add(candidate)
+    return candidate
+
+
+def _proof_to_schema(proof: Proof) -> schemas.ProofCreate:
+    return schemas.ProofCreate(
+        job_id=proof.outcome_id,
+        candidate_id=proof.candidate_id,
+        type=proof.type,
+        payload=proof.payload_json or {},
+    )
+
+
+def _safe_public_signals(signals: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in (signals or {}).items() if not k.startswith("_")}
+
+
+def _verification_status(signals: Dict[str, Any], risk_flags: List[str]) -> str:
+    if "fork_unmodified" in risk_flags:
+        return "conflict"
+    if "authorship_fraction" not in signals:
+        return "unverified"
+
+    value = signals.get("authorship_fraction", 0.0)
+    if isinstance(value, dict):
+        value = value.get("value", 0.0)
+    authorship = float(value or 0.0)
+    if authorship >= 0.2:
+        return "verified"
+    if authorship < 0.05:
+        return "conflict"
+    return "unverified"
+
+
+def _production_readiness(signals: Dict[str, Any]) -> float:
+    keys = {
+        "tests_present": 0.25,
+        "ci_cd_present": 0.15,
+        "deployment_ready": 0.15,
+        "dockerfile_present": 0.10,
+        "readme_quality_score": 0.15,
+        "rate_limiting_present": 0.10,
+        "migrations_present": 0.10,
+    }
+    score = 0.0
+    for key, weight in keys.items():
+        value = signals.get(key, 0.0)
+        if isinstance(value, dict):
+            value = value.get("value", 0.0)
+        score += min(max(float(value or 0.0), 0.0), 1.0) * weight
+    return round(score / sum(keys.values()), 3)
+
+
+def _submission_payload_summary(submission: InviteSubmission) -> Dict[str, Any]:
+    return {
+        "submission_id": submission.id,
+        "candidate_name": submission.candidate_name,
+        "candidate_email": submission.candidate_email,
+        "github_username": submission.github_username,
+        "repo_url": submission.repo_url,
+        "resume_url": submission.resume_url,
+    }
+
+
+def _mark_failure(db, candidate: JobCandidate, submission: Optional[InviteSubmission], error: str):
+    candidate.status = "failed"
+    candidate.evaluation_data = {
+        **(candidate.evaluation_data or {}),
+        "stage": "failed",
+        "error": error[:1000],
+        "failed_at": utc_now().isoformat(),
+    }
+    if submission:
+        submission.status = "failed"
+    db.commit()
+
+
+def _screen_submission(db, submission: InviteSubmission, extractor: SignalExtractor) -> Dict[str, Any]:
+    candidate_id = candidate_id_for_submission(submission)
+    candidate = ensure_job_candidate(db, submission.job_id, candidate_id, status="evaluating")
+    submission.status = "evaluating"
+    db.commit()
+
+    candidate_proofs = db.query(Proof).filter(Proof.candidate_id == candidate_id).all()
+    proof = next(
+        (
+            item for item in candidate_proofs
+            if (item.payload_json or {}).get("invite_submission_id") == submission.id
+        ),
+        candidate_proofs[0] if candidate_proofs else None,
+    )
+
+    if not proof:
+        _mark_failure(db, candidate, submission, "No proof record found for submission.")
+        return {"candidate_id": candidate_id, "status": "failed", "score": 0.0}
+
+    proof_schema = _proof_to_schema(proof)
+    signals = extractor.extract_signals(proof_schema)
+    public_signals = _safe_public_signals(signals)
+    scoring = score_candidate(public_signals)
+
+    verification = _verification_status(public_signals, scoring.risk_flags)
+    score = round(scoring.capped_score * 100, 2)
+    now = utc_now().isoformat()
+
+    candidate.status = "evaluated"
+    candidate.evaluation_score = score
+    candidate.outcome_coverage = round(scoring.confidence * 100, 2)
+    candidate.evaluated_at = utc_now()
+    candidate.evaluation_data = {
+        "stage": "screened",
+        "screened_at": now,
+        "screening": {
+            "score": score,
+            "raw_score": scoring.raw_score,
+            "normalized_score": scoring.normalized_score,
+            "capped_score": scoring.capped_score,
+            "evidence_confidence": scoring.confidence,
+            "production_readiness": _production_readiness(public_signals),
+            "verification_status": verification,
+            "risk_flags": scoring.risk_flags,
+        },
+        "signals": public_signals,
+        "submission": _submission_payload_summary(submission),
+    }
+    submission.status = "evaluated"
+    db.commit()
+
+    return {
+        "candidate_id": candidate_id,
+        "status": "evaluated",
+        "score": score,
+        "signals": signals,
+    }
+
+
+def _deep_evaluate_top_candidates(
+    db,
+    job_id: str,
+    candidate_ids: List[str],
+    signals_by_candidate: Dict[str, Dict[str, Any]],
+) -> int:
+    if not candidate_ids:
+        return 0
+
+    outcomes = db.query(Outcome).filter(Outcome.job_id == job_id).all()
+    evaluator = Evaluator()
+    deep_scores = defaultdict(list)
+    deep_payloads = defaultdict(list)
+    evaluations_created = 0
+
+    for outcome in outcomes:
+        proofs = db.query(Proof).filter(
+            Proof.outcome_id == outcome.id,
+            Proof.candidate_id.in_(candidate_ids),
+        ).all()
+        if not proofs:
+            continue
+
+        outcome_schema = schemas.OutcomeResponse.model_validate(outcome)
+        proof_schemas = [_proof_to_schema(proof) for proof in proofs]
+        signals_map = {
+            candidate_id: signals_by_candidate.get(candidate_id, {})
+            for candidate_id in candidate_ids
+        }
+
+        evaluation = evaluator.evaluate(outcome_schema, proof_schemas, signals_map)
+        crud.create_evaluation(db, evaluation)
+        evaluations_created += 1
+
+        for summary in evaluation.candidate_summaries:
+            deep_scores[summary.candidate_id].append(summary.overall_score)
+            deep_payloads[summary.candidate_id].append({
+                "outcome_id": outcome.id,
+                "outcome_title": outcome.title,
+                "overall_score": summary.overall_score,
+                "capability_score": summary.capability_score,
+                "evidence_confidence": summary.evidence_confidence,
+                "production_readiness": summary.production_readiness,
+                "verification_status": summary.verification_status,
+                "risk_flags": summary.risk_flags,
+            })
+
+    for candidate_id, scores in deep_scores.items():
+        candidate = db.query(JobCandidate).filter(
+            JobCandidate.job_id == job_id,
+            JobCandidate.candidate_id == candidate_id,
+        ).first()
+        if not candidate or not scores:
+            continue
+
+        deep_score = round((sum(scores) / len(scores)) * 100, 2)
+        existing = candidate.evaluation_data or {}
+        candidate.evaluation_score = deep_score
+        candidate.evaluated_at = utc_now()
+        candidate.evaluation_data = {
+            **existing,
+            "stage": "deep_evaluated",
+            "deep_evaluated_at": utc_now().isoformat(),
+            "deep_evaluation": {
+                "score": deep_score,
+                "outcomes": deep_payloads[candidate_id],
+            },
+        }
+
+    db.commit()
+    return evaluations_created
+
+
+def evaluate_job_applications_sync(
+    job_id: str,
+    deep_limit: int = 100,
+    candidate_limit: Optional[int] = None,
+    include_deep_evaluation: bool = True,
+) -> Dict[str, Any]:
+    """Screen all submissions for a job, then deep-evaluate only the top N."""
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise ValueError(f"Job not found: {job_id}")
+
+        query = db.query(InviteSubmission).filter(
+            InviteSubmission.job_id == job_id,
+            InviteSubmission.status.in_(list(QUEUED_STATUSES)),
+        ).order_by(InviteSubmission.submitted_at.asc())
+
+        if candidate_limit:
+            query = query.limit(candidate_limit)
+
+        submissions = query.all()
+        extractor = SignalExtractor()
+        screened: List[Dict[str, Any]] = []
+        signals_by_candidate: Dict[str, Dict[str, Any]] = {}
+
+        for submission in submissions:
+            candidate_id = candidate_id_for_submission(submission)
+            try:
+                result = _screen_submission(db, submission, extractor)
+                screened.append(result)
+                if result.get("signals"):
+                    signals_by_candidate[candidate_id] = result["signals"]
+            except Exception as exc:
+                logger.exception("Failed to screen submission %s", submission.id)
+                candidate = ensure_job_candidate(db, job_id, candidate_id, status="failed")
+                _mark_failure(db, candidate, submission, str(exc))
+                screened.append({"candidate_id": candidate_id, "status": "failed", "score": 0.0})
+
+        successful = [row for row in screened if row.get("status") == "evaluated"]
+        successful.sort(key=lambda row: row.get("score", 0.0), reverse=True)
+        top_candidate_ids = [row["candidate_id"] for row in successful[:max(0, deep_limit)]]
+
+        evaluations_created = 0
+        if include_deep_evaluation and top_candidate_ids and deep_limit > 0:
+            evaluations_created = _deep_evaluate_top_candidates(
+                db,
+                job_id,
+                top_candidate_ids,
+                signals_by_candidate,
+            )
+
+        return {
+            "job_id": job_id,
+            "screened": len(screened),
+            "evaluated": len(successful),
+            "failed": len([row for row in screened if row.get("status") == "failed"]),
+            "deep_evaluated_candidates": len(top_candidate_ids) if include_deep_evaluation else 0,
+            "evaluations_created": evaluations_created,
+        }
+    finally:
+        db.close()
+
+
+def queue_job_evaluation(
+    job_id: str,
+    deep_limit: int = 100,
+    candidate_limit: Optional[int] = None,
+    include_deep_evaluation: bool = True,
+) -> str:
+    return worker_queue.enqueue(
+        evaluate_job_applications_sync,
+        job_id,
+        deep_limit=deep_limit,
+        candidate_limit=candidate_limit,
+        include_deep_evaluation=include_deep_evaluation,
+        name=f"evaluate_job:{job_id}",
+        priority=5,
+    )
+
+
+def mark_job_submissions_queued(db, job_id: str, rerun_evaluated: bool = False) -> int:
+    statuses = list(QUEUED_STATUSES)
+    if rerun_evaluated:
+        statuses.extend(TERMINAL_EVALUATED_STATUSES)
+
+    submissions = db.query(InviteSubmission).filter(
+        InviteSubmission.job_id == job_id,
+        InviteSubmission.status.in_(statuses),
+    ).all()
+
+    for submission in submissions:
+        submission.status = "queued"
+        candidate_id = candidate_id_for_submission(submission)
+        candidate = ensure_job_candidate(db, job_id, candidate_id, status="queued")
+        candidate.evaluation_data = {
+            **(candidate.evaluation_data or {}),
+            "stage": "queued",
+            "queued_at": utc_now().isoformat(),
+        }
+
+    db.commit()
+    return len(submissions)
+
+
+def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
+    submissions = db.query(InviteSubmission).filter(InviteSubmission.job_id == job_id).all()
+    candidates = db.query(JobCandidate).filter(JobCandidate.job_id == job_id).all()
+
+    submission_counts: Dict[str, int] = defaultdict(int)
+    for submission in submissions:
+        submission_counts[submission.status or "submitted"] += 1
+
+    candidate_counts: Dict[str, int] = defaultdict(int)
+    for candidate in candidates:
+        candidate_counts[candidate.status or "submitted"] += 1
+
+    evaluated = [c for c in candidates if c.evaluation_score is not None]
+    evaluated.sort(key=lambda c: c.evaluation_score or 0.0, reverse=True)
+
+    return {
+        "job_id": job_id,
+        "submissions_total": len(submissions),
+        "candidates_total": len(candidates),
+        "submission_status_counts": dict(sorted(submission_counts.items())),
+        "candidate_status_counts": dict(sorted(candidate_counts.items())),
+        "active_count": sum(candidate_counts.get(status, 0) for status in ACTIVE_STATUSES),
+        "evaluated_count": len(evaluated),
+        "top_candidates": [
+            {
+                "candidate_id": c.candidate_id,
+                "status": c.status,
+                "score": c.evaluation_score,
+                "coverage": c.outcome_coverage,
+                "stage": (c.evaluation_data or {}).get("stage"),
+                "verification_status": (
+                    (c.evaluation_data or {}).get("screening", {}).get("verification_status")
+                    or (c.evaluation_data or {}).get("deep_evaluation", {}).get("verification_status")
+                ),
+                "risk_flags": (c.evaluation_data or {}).get("screening", {}).get("risk_flags", []),
+            }
+            for c in evaluated[:20]
+        ],
+        "queue_size": worker_queue.get_queue_size(),
+    }
