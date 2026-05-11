@@ -15,6 +15,7 @@ import os
 import time
 from functools import wraps
 from typing import Any, Optional, Dict
+from urllib.parse import urlsplit, urlunsplit
 
 # Try to import redis, fall back to in-memory cache if not available
 try:
@@ -25,6 +26,23 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _redact_redis_url(redis_url: str) -> str:
+    """Hide credentials before logging a Redis URL."""
+    try:
+        parsed = urlsplit(redis_url)
+        if not parsed.password:
+            return redis_url
+
+        username = f"{parsed.username}:***@" if parsed.username else "***@"
+        host = parsed.hostname or ""
+        if parsed.port:
+            host = f"{host}:{parsed.port}"
+
+        return urlunsplit((parsed.scheme, f"{username}{host}", parsed.path, parsed.query, parsed.fragment))
+    except Exception:
+        return "<redacted-redis-url>"
 
 
 class CacheService:
@@ -57,7 +75,7 @@ class CacheService:
             )
             # Test connection
             self.redis_client.ping()
-            logger.info("Connected to Redis at %s", redis_url)
+            logger.info("Connected to Redis at %s", _redact_redis_url(redis_url))
         except Exception as e:
             logger.warning("Redis connection failed, using in-memory cache: %s", e)
             self.redis_client = None
