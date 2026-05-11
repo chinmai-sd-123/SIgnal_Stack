@@ -103,6 +103,16 @@ Traditional hiring pipelines are fundamentally broken:
 | **Weight History Audit** | Full audit trail of how signal weights change over time |
 | **LLM Log Inspection** | Admin access to review raw LLM inputs/outputs for any evaluation |
 
+### 🌟 Candidate Experience & Invites
+
+| Feature | Description |
+|---------|-------------|
+| **Reusable Invite Links** | Generate permanent, job-level invitation links for multiple candidates |
+| **Unified Application Portal** | A stunning, branded (teal/brass) application portal for candidates |
+| **Duplicate Prevention** | Prevents candidate double-submissions via email validation |
+| **Automated Proof Injection** | Automatically creates Proof records for every outcome in the job |
+| **State Sync & Cascading** | Real-time syncing of AI hiring decisions (Hired/Rejected) back to the recruiter dashboard |
+
 ### 🛠️ Operational Features
 
 | Feature | Description |
@@ -111,6 +121,7 @@ Traditional hiring pipelines are fundamentally broken:
 | **Background Worker Queue** | Async processing for expensive operations (signal extraction, evaluation) |
 | **Redis Caching** | Optional Redis for caching GitHub API responses (falls back to in-memory) |
 | **Admin Dashboard** | System health, audit logs, and configuration management |
+| **SPA Routing** | Seamless client-side routing configured for edge deployments (e.g., Vercel) |
 
 ---
 
@@ -154,6 +165,8 @@ signalstack.db
 ├── outcome_templates     # Reusable outcome definitions
 ├── tasks                 # Decomposed measurable sub-tasks
 ├── jobs                  # Job postings with metadata & SEO fields
+├── invites               # Reusable, permanent job invitation links
+├── invite_submissions    # Candidate applications via invite links
 ├── job_candidates        # Candidate-job associations & status
 ├── proofs                # Candidate submissions (GitHub repos)
 ├── snapshots             # Point-in-time repo analysis snapshots
@@ -321,7 +334,7 @@ npm run dev
 | `POST` | `/evaluate/{outcome_id}` | Run AI evaluation for an outcome |
 | `GET` | `/evaluation/{evaluation_id}` | Get evaluation results |
 
-### Jobs
+### Jobs & Invites
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -330,6 +343,9 @@ npm run dev
 | `GET` | `/jobs/{job_id}` | Get job details |
 | `PUT` | `/jobs/{job_id}` | Update a job |
 | `DELETE` | `/jobs/{job_id}` | Delete a job |
+| `POST` | `/jobs/{job_id}/invites` | Generate a new invite link |
+| `GET` | `/invites/{token}` | Validate candidate invite link |
+| `POST` | `/invites/{token}/submit`| Submit candidate application |
 
 ### Feedback & Learning
 
@@ -383,6 +399,7 @@ signalstack/
 │   │   │   ├── evaluator.py        # Evaluation pipeline
 │   │   │   ├── feedback.py         # Feedback submission
 │   │   │   ├── job.py              # Job management
+│   │   │   ├── invite.py           # Candidate invites & submissions
 │   │   │   ├── public_jobs.py      # Public job listing API
 │   │   │   ├── repo.py             # GitHub repo operations
 │   │   │   ├── snapshot.py         # Snapshot management
@@ -437,7 +454,8 @@ signalstack/
 │   │   ├── pages/                  # Page-level components
 │   │   │   ├── JobDashboard.jsx    # Main dashboard — job listings
 │   │   │   ├── JobCreateWizard.jsx # Job creation wizard
-│   │   │   ├── JobDetail.jsx       # Job detail view
+│   │   │   ├── JobDetail.jsx       # Job detail view with invite links
+│   │   │   ├── CandidateApply.jsx  # Public candidate application portal
 │   │   │   ├── OutcomeCreate.jsx   # Single outcome creation
 │   │   │   ├── OutcomeCreateMultiple.jsx # Batch outcome creation
 │   │   │   ├── OutcomeDashboard.jsx# Outcome detail & progress
