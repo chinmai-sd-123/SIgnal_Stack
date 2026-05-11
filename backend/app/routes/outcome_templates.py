@@ -49,7 +49,7 @@ def get_outcome_templates(
     # 2. Fetch Legacy Outcome Templates (is_template=1)
     # Import Outcome model here to avoid circular imports if any, or better at top if safe.
     from app.models.outcome import Outcome
-    legacy_query = db.query(Outcome).filter(Outcome.is_template == True)
+    legacy_query = db.query(Outcome).filter(Outcome.is_template == 1)
     if category_slug:
         # Assuming Outcome has category field? If not, skip filter or verify model.
         # Legacy Outcome model usually has 'category' string instead of slug.
