@@ -31,7 +31,8 @@ def _report_refresh_needed(progress: dict) -> bool:
     if evaluated_count <= 0:
         return False
     for outcome in progress.get("outcome_statuses") or []:
-        if int(outcome.get("report_candidate_count") or 0) < evaluated_count:
+        expected = int(outcome.get("report_expected_candidate_count") or evaluated_count)
+        if int(outcome.get("report_candidate_count") or 0) < expected:
             return True
     return False
 

@@ -476,11 +476,13 @@ export default function JobDetail() {
                                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
                                     outcome.status === 'evaluated'
                                         ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100'
-                                        : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
+                                        : outcome.status === 'stale'
+                                            ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+                                            : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
                                 }`}
                             >
                                 <span className="max-w-[14rem] truncate">{outcome.title}</span>
-                                <span>{outcome.status === 'evaluated' ? 'View report' : 'pending'}</span>
+                                <span>{outcome.status === 'evaluated' ? 'View report' : outcome.status === 'stale' ? 'refresh needed' : 'pending'}</span>
                             </Link>
                         ))}
                     </div>
@@ -520,6 +522,7 @@ export default function JobDetail() {
                         {outcomes.map((outcome) => {
                             const reportStatus = getOutcomeReportStatus(outcome.id);
                             const hasReport = reportStatus?.status === 'evaluated';
+                            const hasStaleReport = reportStatus?.status === 'stale';
                             const primaryPath = hasReport ? `/evaluation/${outcome.id}` : `/dashboard/${outcome.id}`;
 
                             return (
@@ -573,9 +576,15 @@ export default function JobDetail() {
                                         }`}>
                                         {outcome.status}
                                     </span>
-                                    {hasReport && (
-                                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-100">
-                                            Report ready{reportStatus.report_candidate_count ? ` - ${reportStatus.report_candidate_count} candidates` : ''}
+                                    {(hasReport || hasStaleReport) && (
+                                        <span className={`px-2 py-0.5 rounded text-xs font-medium border ${
+                                            hasReport
+                                                ? 'bg-green-50 text-green-700 border-green-100'
+                                                : 'bg-amber-50 text-amber-700 border-amber-100'
+                                        }`}>
+                                            {hasReport
+                                                ? `Report ready${reportStatus.report_candidate_count ? ` - ${reportStatus.report_candidate_count} candidates` : ''}`
+                                                : `Report stale - ${reportStatus.report_candidate_count || 0}/${reportStatus.report_expected_candidate_count || evaluatedCount} candidates`}
                                         </span>
                                     )}
                                 </div>

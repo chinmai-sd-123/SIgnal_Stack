@@ -559,3 +559,71 @@ def test_staged_job_evaluation_refreshes_reports_with_later_candidates(db_sessio
         )
         assert status["latest_evaluation_id"] == latest.id
         assert status["report_candidate_count"] == 3
+
+
+def test_progress_marks_partial_latest_report_as_stale(db_session):
+    job_id = "job-stale-report"
+    outcome = Outcome(
+        id="outcome-stale-report",
+        job_id=job_id,
+        title="Productionize AI Backend Services",
+        description="Build backend services",
+        status="active",
+    )
+    job = Job(
+        id=job_id,
+        title="AI Engineer Intern",
+        description="Build AI systems",
+        company="SignalStack",
+        location="Remote",
+        status="active",
+    )
+    invite = Invite(
+        id="invite-stale-report",
+        token="token-stale-report",
+        job_id=job_id,
+        status="active",
+        expires_at=utc_now() + timedelta(days=7),
+    )
+    db_session.add_all([job, outcome, invite])
+    db_session.commit()
+
+    for candidate_id, score in [("manu", 54.0), ("johny", 25.0), ("chinmaisd", 56.0)]:
+        _add_submission_with_proofs(db_session, invite, job_id, [outcome], candidate_id, status="evaluated")
+        db_session.add(JobCandidate(
+            id=f"jc-{candidate_id}",
+            job_id=job_id,
+            candidate_id=f"{candidate_id}@example.com",
+            status="evaluated",
+            evaluation_score=score,
+            evaluation_data={
+                "submission": {
+                    "candidate_name": candidate_id,
+                    "candidate_email": f"{candidate_id}@example.com",
+                },
+                "signals": {},
+            },
+        ))
+    db_session.add(Evaluation(
+        job_id=outcome.id,
+        outcome_id=outcome.id,
+        status="completed",
+        fit_score=0.55,
+        evaluation_json={
+            "candidate_summaries": [
+                {"candidate_id": "manu@example.com", "overall_score": 0.54},
+                {"candidate_id": "chinmaisd@example.com", "overall_score": 0.56},
+            ],
+        },
+    ))
+    db_session.commit()
+
+    progress = bulk.get_job_evaluation_progress(db_session, job_id)
+    status = progress["outcome_statuses"][0]
+
+    assert progress["evaluated_count"] == 3
+    assert progress["outcomes_evaluated"] == 0
+    assert status["status"] == "stale"
+    assert status["report_candidate_count"] == 2
+    assert status["report_expected_candidate_count"] == 3
+    assert status["report_missing_candidate_count"] == 1

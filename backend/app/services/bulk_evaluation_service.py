@@ -20,7 +20,7 @@ from app.pipeline.signal_extractor import SignalExtractor
 from app.monitoring import track_evaluation_complete, track_evaluation_start
 from app.services import crud
 from app.services.cache import cache
-from app.services.submission_proof_service import get_candidate_id
+from app.services.submission_proof_service import get_candidate_id, sync_job_invite_proofs
 from app.services.worker_queue import TaskStatus, worker_queue
 from app.utils.time_utils import utc_now
 
@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 QUEUED_STATUSES = {"submitted", "queued", "failed"}
 ACTIVE_STATUSES = {"queued", "evaluating"}
 TERMINAL_EVALUATED_STATUSES = {"evaluated", "shortlisted", "rejected"}
+DEFAULT_DEEP_REPORT_LIMIT = 25
 
 REDIS_JOB_EVAL_QUEUE = "signalstack:job_evaluations:queue"
 REDIS_JOB_EVAL_PROCESSING = "signalstack:job_evaluations:processing"
@@ -580,6 +581,7 @@ def evaluate_job_applications_sync(
         if not job:
             raise ValueError(f"Job not found: {job_id}")
 
+        sync_job_invite_proofs(db, job_id)
         _recover_interrupted_evaluations(db, job_id)
 
         extractor = SignalExtractor()
@@ -622,6 +624,7 @@ def evaluate_job_applications_sync(
             deep_evaluated_candidates = len(top_candidate_ids)
 
             if include_deep_evaluation and top_candidate_ids and deep_limit > 0:
+                sync_job_invite_proofs(db, job_id)
                 evaluations_created += _deep_evaluate_top_candidates(
                     db,
                     job_id,
@@ -742,11 +745,12 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
 
     evaluated = [c for c in candidates if c.evaluation_score is not None]
     evaluated.sort(key=lambda c: c.evaluation_score or 0.0, reverse=True)
+    expected_report_candidates = evaluated[:DEFAULT_DEEP_REPORT_LIMIT]
+    evaluated_candidate_ids = {c.candidate_id for c in expected_report_candidates}
 
     evaluations = []
     if outcome_ids:
         evaluations = db.query(Evaluation).filter(Evaluation.outcome_id.in_(outcome_ids)).all()
-    evaluated_outcome_ids = {item.outcome_id for item in evaluations if item.evaluation_json}
     latest_evaluation_by_outcome: Dict[str, Evaluation] = {}
     for item in evaluations:
         if not item.evaluation_json:
@@ -757,27 +761,42 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
 
     job_queue_size = get_job_evaluation_queue_size(job_id)
 
+    outcome_statuses = []
+    outcomes_ready = 0
+    for outcome in outcomes:
+        latest_evaluation = latest_evaluation_by_outcome.get(outcome.id)
+        latest_payload = latest_evaluation.evaluation_json if latest_evaluation else {}
+        report_candidate_ids = {
+            item.get("candidate_id")
+            for item in (latest_payload or {}).get("candidate_summaries", [])
+            if item.get("candidate_id")
+        }
+        expected_candidate_ids = set(evaluated_candidate_ids)
+        missing_candidate_count = len(expected_candidate_ids - report_candidate_ids)
+        has_report = bool(latest_evaluation)
+        is_ready = has_report and missing_candidate_count == 0
+        if is_ready:
+            outcomes_ready += 1
+
+        outcome_statuses.append({
+            "outcome_id": outcome.id,
+            "title": outcome.title,
+            "status": "evaluated" if is_ready else ("stale" if has_report and expected_candidate_ids else "pending"),
+            "latest_evaluation_id": latest_evaluation.id if latest_evaluation else None,
+            "latest_evaluated_at": latest_evaluation.created_at.isoformat()
+            if latest_evaluation and latest_evaluation.created_at else None,
+            "report_candidate_count": len(report_candidate_ids),
+            "report_expected_candidate_count": len(expected_candidate_ids),
+            "report_missing_candidate_count": missing_candidate_count,
+        })
+
     return {
         "job_id": job_id,
         "submissions_total": len(submissions),
         "candidates_total": len(candidates),
         "outcomes_total": len(outcomes),
-        "outcomes_evaluated": len(evaluated_outcome_ids),
-        "outcome_statuses": [
-            {
-                "outcome_id": outcome.id,
-                "title": outcome.title,
-                "status": "evaluated" if outcome.id in evaluated_outcome_ids else "pending",
-                "latest_evaluation_id": latest_evaluation_by_outcome.get(outcome.id).id
-                if outcome.id in latest_evaluation_by_outcome else None,
-                "latest_evaluated_at": latest_evaluation_by_outcome.get(outcome.id).created_at.isoformat()
-                if outcome.id in latest_evaluation_by_outcome and latest_evaluation_by_outcome[outcome.id].created_at else None,
-                "report_candidate_count": len(
-                    (latest_evaluation_by_outcome.get(outcome.id).evaluation_json or {}).get("candidate_summaries", [])
-                ) if outcome.id in latest_evaluation_by_outcome else 0,
-            }
-            for outcome in outcomes
-        ],
+        "outcomes_evaluated": outcomes_ready,
+        "outcome_statuses": outcome_statuses,
         "submission_status_counts": dict(sorted(submission_counts.items())),
         "candidate_status_counts": dict(sorted(candidate_counts.items())),
         "active_count": sum(candidate_counts.get(status, 0) for status in ACTIVE_STATUSES),
