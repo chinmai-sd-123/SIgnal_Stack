@@ -285,8 +285,13 @@ export async function getOutcomeTemplates(categorySlug = null) {
     return response.json();
 }
 
-export async function deleteJob(jobId, hardDelete = false) {
-    const url = `/jobs/${jobId}${hardDelete ? '?hard_delete=true' : ''}`;
+export async function deleteJob(jobId, hardDelete = false, confirmation = '') {
+    const params = new URLSearchParams();
+    if (hardDelete) {
+        params.set('hard_delete', 'true');
+        params.set('confirmation', confirmation);
+    }
+    const url = `/jobs/${jobId}${params.toString() ? `?${params.toString()}` : ''}`;
     const response = await apiFetch(url, {
         method: 'DELETE',
     });

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, joinedload
 from typing import List
@@ -482,34 +482,133 @@ def get_job_outcomes(
 def delete_job(
     job_id: str, 
     hard_delete: bool = False,
+    confirmation: str = Query("", description="Type DELETE to permanently delete a job."),
     db: Session = Depends(get_db),
     current: Recruiter = Depends(get_current_recruiter),
 ):
     """
     Delete or archive a job.
     - Default (soft delete): Sets status to 'archived', hides from listings
-    - Hard delete: Permanently removes from database (only if no outcomes exist)
+    - Hard delete: Permanently removes the job and all linked application/evaluation data
     """
     job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
     ensure_job_access(job, current)
     
     if hard_delete:
-        # Check if job has any outcomes
-        from app.models import outcome as outcome_models
-        outcomes_count = db.query(outcome_models.Outcome).filter(
-            outcome_models.Outcome.job_id == job_id
-        ).count()
-        
-        if outcomes_count > 0:
+        if confirmation != "DELETE":
             raise HTTPException(
-                status_code=400, 
-                detail=f"Cannot permanently delete job with {outcomes_count} outcome(s). Archive it instead or delete outcomes first."
+                status_code=400,
+                detail="Permanent delete requires confirmation=DELETE.",
             )
-        
-        # Permanent delete (only if no outcomes)
+
+        from app.models import outcome as outcome_models
+        from app.models import task as task_models
+        from app.models.audit import AuditLog
+        from app.models.evaluation import Evaluation
+        from app.models.feedback import Feedback, SignalWeight
+        from app.models.invite import Invite, InviteSubmission
+        from app.models.job_candidate import JobCandidate
+        from app.models.proof import Proof
+        from app.models.snapshot import LLMLog
+
+        outcome_ids = [
+            row[0]
+            for row in db.query(outcome_models.Outcome.id)
+            .filter(outcome_models.Outcome.job_id == job_id)
+            .all()
+        ]
+        task_ids = [
+            row[0]
+            for row in db.query(task_models.Task.id)
+            .filter(task_models.Task.outcome_id.in_(outcome_ids))
+            .all()
+        ] if outcome_ids else []
+        evaluation_ids = [
+            row[0]
+            for row in db.query(Evaluation.id)
+            .filter(Evaluation.outcome_id.in_(outcome_ids))
+            .all()
+        ] if outcome_ids else []
+
+        deleted_counts = {
+            "feedback": 0,
+            "llm_logs": 0,
+            "evaluations": 0,
+            "proofs": 0,
+            "task_weights": 0,
+            "task_weight_history": 0,
+            "tasks": 0,
+            "outcomes": 0,
+            "invite_submissions": 0,
+            "invites": 0,
+            "job_candidates": 0,
+            "audit_logs": 0,
+        }
+
+        if evaluation_ids:
+            deleted_counts["feedback"] += db.query(Feedback).filter(
+                Feedback.evaluation_id.in_(evaluation_ids)
+            ).delete(synchronize_session=False)
+            deleted_counts["llm_logs"] += db.query(LLMLog).filter(
+                LLMLog.evaluation_id.in_(evaluation_ids)
+            ).delete(synchronize_session=False)
+
+        deleted_counts["feedback"] += db.query(Feedback).filter(
+            Feedback.job_id == job_id
+        ).delete(synchronize_session=False)
+
+        if outcome_ids:
+            deleted_counts["task_weight_history"] += db.query(task_models.TaskWeightHistory).filter(
+                task_models.TaskWeightHistory.outcome_id.in_(outcome_ids)
+            ).delete(synchronize_session=False)
+            deleted_counts["evaluations"] += db.query(Evaluation).filter(
+                Evaluation.outcome_id.in_(outcome_ids)
+            ).delete(synchronize_session=False)
+            deleted_counts["evaluations"] += db.query(Evaluation).filter(
+                Evaluation.job_id.in_(outcome_ids)
+            ).delete(synchronize_session=False)
+            deleted_counts["proofs"] += db.query(Proof).filter(
+                Proof.outcome_id.in_(outcome_ids)
+            ).delete(synchronize_session=False)
+            deleted_counts["tasks"] += db.query(task_models.Task).filter(
+                task_models.Task.outcome_id.in_(outcome_ids)
+            ).delete(synchronize_session=False)
+            deleted_counts["outcomes"] += db.query(outcome_models.Outcome).filter(
+                outcome_models.Outcome.id.in_(outcome_ids)
+            ).delete(synchronize_session=False)
+            deleted_counts["audit_logs"] += db.query(AuditLog).filter(
+                AuditLog.entity_id.in_(outcome_ids)
+            ).delete(synchronize_session=False)
+
+        if task_ids:
+            deleted_counts["task_weights"] += db.query(SignalWeight).filter(
+                SignalWeight.task_id.in_(task_ids)
+            ).delete(synchronize_session=False)
+
+        deleted_counts["task_weight_history"] += db.query(task_models.TaskWeightHistory).filter(
+            task_models.TaskWeightHistory.feedback_source_job_id == job_id
+        ).delete(synchronize_session=False)
+        deleted_counts["invite_submissions"] += db.query(InviteSubmission).filter(
+            InviteSubmission.job_id == job_id
+        ).delete(synchronize_session=False)
+        deleted_counts["invites"] += db.query(Invite).filter(
+            Invite.job_id == job_id
+        ).delete(synchronize_session=False)
+        deleted_counts["job_candidates"] += db.query(JobCandidate).filter(
+            JobCandidate.job_id == job_id
+        ).delete(synchronize_session=False)
+        deleted_counts["audit_logs"] += db.query(AuditLog).filter(
+            AuditLog.entity_id == job_id
+        ).delete(synchronize_session=False)
+
         db.delete(job)
         db.commit()
-        return {"message": "Job permanently deleted", "job_id": job_id, "type": "hard_delete"}
+        return {
+            "message": "Job permanently deleted",
+            "job_id": job_id,
+            "type": "hard_delete",
+            "deleted": deleted_counts,
+        }
     else:
         # Soft delete - archive the job
         job.status = "archived"

@@ -4,7 +4,7 @@ import {
     Briefcase, MapPin, Building, IndianRupee, Clock,
     CheckCircle, Plus, ArrowLeft, ChevronRight, Trash2,
     Send, Copy, ExternalLink, UserPlus, X, RefreshCw,
-    Github, Linkedin, FileText, Code, Pencil
+    Github, Linkedin, FileText, Code, Pencil, AlertTriangle
 } from 'lucide-react';
 import {
     getJob, getJobOutcomes, deleteJob, createInvite, getJobInvites, deleteInvite,
@@ -26,6 +26,9 @@ export default function JobDetail() {
     const [evaluationProgress, setEvaluationProgress] = useState(null);
     const [queueingEvaluation, setQueueingEvaluation] = useState(false);
     const [evaluationMessage, setEvaluationMessage] = useState('');
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [deleteConfirmation, setDeleteConfirmation] = useState('');
+    const [deletingJob, setDeletingJob] = useState(false);
 
     const hasEvaluationActivity = useCallback((progress) => {
         if (!progress) return false;
@@ -286,6 +289,22 @@ export default function JobDetail() {
         }
     };
 
+    const handlePermanentDeleteJob = async () => {
+        if (deleteConfirmation !== 'DELETE') return;
+
+        setDeletingJob(true);
+        try {
+            await deleteJob(jobId, true, deleteConfirmation);
+            setDeleteModalOpen(false);
+            alert('Job permanently deleted.');
+            navigate('/');
+        } catch (error) {
+            alert(`Failed to delete job: ${error.message}`);
+        } finally {
+            setDeletingJob(false);
+        }
+    };
+
     if (loading) return (
         <div className="flex justify-center items-center py-20">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
@@ -361,13 +380,23 @@ export default function JobDetail() {
                         </div>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <button
                             onClick={handleArchiveJob}
-                            className="btn btn-ghost text-red-600 hover:text-red-700 hover:bg-red-50"
+                            className="btn btn-ghost text-amber-700 hover:text-amber-800 hover:bg-amber-50"
+                        >
+                            <X className="w-4 h-4 mr-2" />
+                            Archive Job
+                        </button>
+                        <button
+                            onClick={() => {
+                                setDeleteConfirmation('');
+                                setDeleteModalOpen(true);
+                            }}
+                            className="btn bg-white text-red-700 border border-red-200 hover:bg-red-50"
                         >
                             <Trash2 className="w-4 h-4 mr-2" />
-                            Archive Job
+                            Delete Job
                         </button>
                     </div>
                 </div>
@@ -594,6 +623,65 @@ export default function JobDetail() {
                     </div>
                 )}
             </div>
+
+            {deleteModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 backdrop-blur-sm">
+                    <div className="w-full max-w-lg rounded-2xl border border-red-200 bg-[rgba(255,253,248,0.98)] p-6 shadow-2xl">
+                        <div className="flex items-start gap-4">
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 border border-red-100">
+                                <AlertTriangle className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                                <h2 className="text-xl font-bold text-text-primary">Permanently delete job?</h2>
+                                <p className="mt-2 text-sm text-text-secondary">
+                                    This will remove the job, outcomes, signals, invite submissions, candidate records,
+                                    proofs, evaluation reports, feedback, and linked admin logs. This action cannot be undone.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mt-5 rounded-xl border border-red-100 bg-red-50/70 p-4 text-sm text-red-800">
+                            <div className="font-semibold">{job.title}</div>
+                            <div className="mt-1 text-red-700">
+                                {outcomes.length} outcome{outcomes.length === 1 ? '' : 's'} - {totalInviteSubmissions} submission{totalInviteSubmissions === 1 ? '' : 's'}
+                            </div>
+                        </div>
+
+                        <label className="mt-5 block">
+                            <span className="text-sm font-semibold text-text-primary">
+                                Type <span className="font-mono text-red-700">DELETE</span> to confirm
+                            </span>
+                            <input
+                                value={deleteConfirmation}
+                                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 font-mono text-sm text-text-primary focus:border-red-400 focus:ring-red-100"
+                                placeholder="DELETE"
+                                autoFocus
+                            />
+                        </label>
+
+                        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setDeleteModalOpen(false)}
+                                disabled={deletingJob}
+                                className="btn btn-outline"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handlePermanentDeleteJob}
+                                disabled={deleteConfirmation !== 'DELETE' || deletingJob}
+                                className="btn bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:hover:bg-red-600"
+                            >
+                                {deletingJob ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                Delete Permanently
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Invite Candidates Section */}
             <div className="space-y-4">
