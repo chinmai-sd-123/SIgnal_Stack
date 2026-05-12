@@ -222,6 +222,15 @@ export default function EvaluationView() {
         [fallbackSummaries]
     );
 
+    const batchAverageScore = useMemo(() => {
+        if (!fallbackSummaries.length) return null;
+        const total = fallbackSummaries.reduce(
+            (sum, candidate) => sum + Number(candidate.overall_score || 0),
+            0
+        );
+        return total / fallbackSummaries.length;
+    }, [fallbackSummaries]);
+
     const comparisonData = useMemo(() => {
         const allocations = evaluation?.work_allocation || [];
 
@@ -350,13 +359,19 @@ export default function EvaluationView() {
                 <div className="hero-gradient rounded-2xl p-8 text-white mb-8 shadow-xl">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                         <div>
-                            <h2 className="text-lg font-medium opacity-80">Overall Fit Score</h2>
+                            <h2 className="text-lg font-medium opacity-80">Top Fit Score</h2>
                             <div className="flex items-baseline gap-2 mt-2">
                                 <span className="text-5xl font-black">{Math.round(evaluation.fit_score * 100)}</span>
                                 <span className="text-2xl font-medium opacity-70">%</span>
                             </div>
-                            <p className="text-sm opacity-70 mt-2">Based on {evaluation.work_allocation.length} tasks</p>
-                            <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                            <p className="text-sm opacity-70 mt-2">
+                                Best candidate score across {evaluation.work_allocation.length} tasks
+                            </p>
+                            <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                                <div className="bg-white/15 rounded-lg px-3 py-2">
+                                    <div className="opacity-70">Batch Avg</div>
+                                    <div className="font-bold">{batchAverageScore != null ? `${Math.round(batchAverageScore * 100)}%` : 'N/A'}</div>
+                                </div>
                                 <div className="bg-white/15 rounded-lg px-3 py-2">
                                     <div className="opacity-70">Capability</div>
                                     <div className="font-bold">{Math.round((evaluation.capability_score ?? evaluation.fit_score) * 100)}%</div>
