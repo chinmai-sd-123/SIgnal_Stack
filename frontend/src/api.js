@@ -118,6 +118,30 @@ export async function getJobOutcomes(jobId) {
     return response.json();
 }
 
+export async function updateOutcome(outcomeId, outcome) {
+    const response = await fetch(`${API_URL}/outcomes/${outcomeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(outcome),
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to update outcome");
+    }
+    return response.json();
+}
+
+export async function deleteOutcome(outcomeId) {
+    const response = await fetch(`${API_URL}/outcomes/${outcomeId}`, {
+        method: "DELETE",
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to delete outcome");
+    }
+    return response.json();
+}
+
 export async function queueJobEvaluation(jobId, options = {}) {
     const response = await fetch(`${API_URL}/jobs/${jobId}/evaluations/queue`, {
         method: "POST",

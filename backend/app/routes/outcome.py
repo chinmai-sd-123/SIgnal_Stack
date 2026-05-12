@@ -38,6 +38,31 @@ def get_outcome(outcome_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Outcome not found")
     return outcome
 
+@router.patch("/outcomes/{outcome_id}", response_model=schemas.OutcomeResponse)
+def update_outcome(outcome_id: str, outcome: schemas.OutcomeUpdate, db: Session = Depends(get_db)):
+    result = crud.update_outcome(db, outcome_id, outcome)
+    if not result:
+        raise HTTPException(status_code=404, detail="Outcome not found")
+
+    crud.create_audit_log(db, "outcome", result.id, "updated", {"title": result.title})
+    sync_outcome_invite_proofs(db, result.id)
+    return result
+
+@router.delete("/outcomes/{outcome_id}")
+def delete_outcome(outcome_id: str, db: Session = Depends(get_db)):
+    existing = crud.get_outcome(db, outcome_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Outcome not found")
+
+    job_id = existing.job_id
+    title = existing.title
+    deleted = crud.delete_outcome(db, outcome_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Outcome not found")
+
+    crud.create_audit_log(db, "outcome", outcome_id, "deleted", {"title": title, "job_id": job_id})
+    return {"id": outcome_id, "job_id": job_id, "status": "deleted"}
+
 @router.post("/outcomes/template", response_model=schemas.OutcomeResponse)
 def create_outcome_template(outcome: schemas.OutcomeCreate, db: Session = Depends(get_db)):
     """Create a new reusable Outcome Template (Master)."""

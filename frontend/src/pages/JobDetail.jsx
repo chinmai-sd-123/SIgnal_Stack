@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import {
     getJob, getJobOutcomes, deleteJob, createInvite, getJobInvites, deleteInvite,
-    deleteSubmission, updateSubmission, getJobEvaluationProgress, queueJobEvaluation
+    deleteOutcome, deleteSubmission, updateSubmission, getJobEvaluationProgress, queueJobEvaluation
 } from '../api';
 
 export default function JobDetail() {
@@ -162,6 +162,21 @@ export default function JobDetail() {
             })));
         } catch (error) {
             alert(`Failed: ${error.message}`);
+        }
+    };
+
+    const handleDeleteOutcome = async (outcome) => {
+        const confirmed = window.confirm(
+            `Delete this outcome?\n\n"${outcome.title}"\n\nThis will remove its signals, linked candidate proofs, and stored evaluation reports.`
+        );
+        if (!confirmed) return;
+
+        try {
+            await deleteOutcome(outcome.id);
+            setOutcomes(current => current.filter(item => item.id !== outcome.id));
+            await refreshEvaluationState().catch(() => null);
+        } catch (error) {
+            alert(`Failed to delete outcome: ${error.message}`);
         }
     };
 
@@ -452,16 +467,18 @@ export default function JobDetail() {
                 {progress.outcome_statuses?.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
                         {progress.outcome_statuses.map(outcome => (
-                            <span
+                            <Link
                                 key={outcome.outcome_id}
+                                to={outcome.status === 'evaluated' ? `/evaluation/${outcome.outcome_id}` : `/dashboard/${outcome.outcome_id}`}
                                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
                                     outcome.status === 'evaluated'
-                                        ? 'bg-green-50 text-green-700 border border-green-200'
-                                        : 'bg-gray-50 text-gray-600 border border-gray-200'
+                                        ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100'
+                                        : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
                                 }`}
                             >
-                                {outcome.title}: {outcome.status}
-                            </span>
+                                <span className="max-w-[14rem] truncate">{outcome.title}</span>
+                                <span>{outcome.status === 'evaluated' ? 'View report' : 'pending'}</span>
+                            </Link>
                         ))}
                     </div>
                 )}
@@ -498,20 +515,36 @@ export default function JobDetail() {
                 ) : (
                     <div className="grid grid-cols-1 gap-4">
                         {outcomes.map((outcome) => (
-                            <Link
+                            <div
                                 key={outcome.id}
-                                to={`/dashboard/${outcome.id}`}
-                                className="block bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:border-primary transition-colors"
+                                className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:border-primary transition-colors"
                             >
-                                <div className="flex justify-between items-start">
-                                    <div>
+                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+                                    <Link to={`/dashboard/${outcome.id}`} className="min-w-0 flex-1">
                                         <h3 className="text-lg font-semibold text-gray-900 group-hover:text-primary">
                                             {outcome.title}
                                         </h3>
                                         <p className="text-gray-500 mt-1 line-clamp-2">{outcome.description}</p>
-                                    </div>
-                                    <div className="bg-primary-soft p-2 rounded-full text-primary">
-                                        <ChevronRight className="w-5 h-5" />
+                                    </Link>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                        <Link
+                                            to={`/outcomes/${outcome.id}/edit`}
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-xs font-semibold hover:bg-gray-200"
+                                        >
+                                            <Pencil className="w-3.5 h-3.5" />
+                                            Edit
+                                        </Link>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDeleteOutcome(outcome)}
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 text-red-700 border border-red-100 text-xs font-semibold hover:bg-red-100"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                            Delete
+                                        </button>
+                                        <Link to={`/dashboard/${outcome.id}`} className="bg-primary-soft p-2 rounded-full text-primary">
+                                            <ChevronRight className="w-5 h-5" />
+                                        </Link>
                                     </div>
                                 </div>
                                 <div className="mt-4 flex items-center gap-4 text-sm text-gray-500">
@@ -524,7 +557,7 @@ export default function JobDetail() {
                                         {outcome.status}
                                     </span>
                                 </div>
-                            </Link>
+                            </div>
                         ))}
                     </div>
                 )}

@@ -7,6 +7,7 @@ import JobDetail from './pages/JobDetail';
 import Dashboard from './pages/Dashboard'; // Legacy
 import OutcomeCreate from './pages/OutcomeCreate';
 import OutcomeCreateMultiple from './pages/OutcomeCreateMultiple';
+import OutcomeEdit from './pages/OutcomeEdit';
 import ProofSubmit from './pages/ProofSubmit';
 import EvaluationView from './pages/EvaluationView';
 import ReviewerQueue from './pages/ReviewerQueue';
@@ -30,6 +31,7 @@ function App() {
           <Route path="/jobs/:jobId" element={<JobDetail />} />
           <Route path="/jobs/:jobId/add-outcome" element={<OutcomeCreate />} />
           <Route path="/jobs/:jobId/outcomes/new" element={<OutcomeCreateMultiple />} />
+          <Route path="/outcomes/:outcomeId/edit" element={<OutcomeEdit />} />
 
           {/* New unified flow - creates job and outcomes together */}
           <Route path="/outcomes/create-with-job" element={<OutcomeCreateMultiple />} />

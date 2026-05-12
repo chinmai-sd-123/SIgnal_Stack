@@ -53,6 +53,63 @@ def create_outcome(db: Session, outcome: schemas.OutcomeCreate, job_id: str = No
     db.commit()
     return db_outcome
 
+def update_outcome(db: Session, outcome_id: str, payload: schemas.OutcomeUpdate) -> models.Outcome:
+    db_outcome = get_outcome(db, outcome_id)
+    if not db_outcome:
+        return None
+
+    data = payload.model_dump(exclude_unset=True, exclude={"tasks"})
+    tasks = payload.tasks if "tasks" in payload.model_fields_set else None
+
+    for field, value in data.items():
+        if value is not None and hasattr(db_outcome, field):
+            setattr(db_outcome, field, value)
+
+    if tasks is not None:
+        db.query(models.Task).filter(models.Task.outcome_id == outcome_id).delete(synchronize_session=False)
+        priority_map = {"High": 3, "Medium": 2, "Low": 1}
+        total_score = sum(priority_map.get(task.priority, 1) for task in tasks)
+        current_weight_sum = 0.0
+
+        for index, task in enumerate(tasks):
+            if total_score > 0:
+                weight = priority_map.get(task.priority, 1) / total_score
+            else:
+                weight = task.weight or 0.0
+
+            if index == len(tasks) - 1:
+                weight = max(0.0, 1.0 - current_weight_sum)
+            else:
+                weight = round(weight, 4)
+                current_weight_sum += weight
+
+            db.add(models.Task(
+                id=str(uuid.uuid4()),
+                outcome_id=outcome_id,
+                name=task.name,
+                priority=task.priority,
+                weight=weight,
+                version=(db_outcome.version or 1) + 1,
+            ))
+
+    db_outcome.version = (db_outcome.version or 1) + 1
+    db.query(models.Evaluation).filter(models.Evaluation.outcome_id == outcome_id).delete(synchronize_session=False)
+    db.commit()
+    db.refresh(db_outcome)
+    return db_outcome
+
+def delete_outcome(db: Session, outcome_id: str) -> bool:
+    db_outcome = get_outcome(db, outcome_id)
+    if not db_outcome:
+        return False
+
+    db.query(models.Evaluation).filter(models.Evaluation.outcome_id == outcome_id).delete(synchronize_session=False)
+    db.query(models.Evaluation).filter(models.Evaluation.job_id == outcome_id).delete(synchronize_session=False)
+    db.query(models.Proof).filter(models.Proof.outcome_id == outcome_id).delete(synchronize_session=False)
+    db.delete(db_outcome)
+    db.commit()
+    return True
+
 def instantiate_outcome_from_template(db: Session, template_id: str, target_job_id: str) -> models.Outcome:
     """
     Creates a new Outcome instance from a Master Template.

@@ -6,6 +6,7 @@ import {
     CheckCircle,
     ChevronRight,
     Clock,
+    FileText,
     Layers,
     PlayCircle,
     RefreshCw,
@@ -17,6 +18,7 @@ import { getJobEvaluationProgress, getJobs, queueJobEvaluation } from '../api';
 const STATUSES = ['submitted', 'queued', 'evaluating', 'evaluated', 'failed'];
 const FILTERS = [
     { id: 'active', label: 'Active' },
+    { id: 'reports', label: 'Reports Ready' },
     { id: 'needs_action', label: 'Needs Action' },
     { id: 'completed', label: 'Completed' },
     { id: 'all', label: 'All Open' },
@@ -53,6 +55,10 @@ function isArchived(job) {
     return job?.status === 'archived';
 }
 
+function evaluatedOutcomes(progress) {
+    return (progress?.outcome_statuses || []).filter((outcome) => outcome.status === 'evaluated');
+}
+
 export default function ReviewerQueue() {
     const [jobs, setJobs] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -60,7 +66,7 @@ export default function ReviewerQueue() {
     const [actionJobId, setActionJobId] = useState(null);
     const [error, setError] = useState('');
     const [anonymized, setAnonymized] = useState(false);
-    const [filter, setFilter] = useState('active');
+    const [filter, setFilter] = useState('all');
     const [search, setSearch] = useState('');
 
     const loadQueue = useCallback(async ({ silent = false } = {}) => {
@@ -116,10 +122,12 @@ export default function ReviewerQueue() {
             const evaluated = Number(progress?.evaluated_count || 0);
             const completed = total > 0 && evaluated >= total && !active && !failed;
             const archived = isArchived(job);
+            const hasReports = evaluatedOutcomes(progress).length > 0;
 
             if (filter === 'archived' && !archived) return false;
             if (filter !== 'archived' && archived) return false;
             if (filter === 'active' && !active) return false;
+            if (filter === 'reports' && !hasReports) return false;
             if (filter === 'needs_action' && !failed) return false;
             if (filter === 'completed' && !completed) return false;
 
@@ -150,14 +158,16 @@ export default function ReviewerQueue() {
             const evaluated = Number(progress?.evaluated_count || 0);
             const completed = total > 0 && evaluated >= total && !active && !failed;
             const archived = isArchived(job);
+            const hasReports = evaluatedOutcomes(progress).length > 0;
 
             if (archived) counts.archived += 1;
             else counts.all += 1;
             if (!archived && active) counts.active += 1;
+            if (!archived && hasReports) counts.reports += 1;
             if (!archived && failed) counts.needs_action += 1;
             if (!archived && completed) counts.completed += 1;
             return counts;
-        }, { active: 0, needs_action: 0, completed: 0, all: 0, archived: 0 });
+        }, { active: 0, reports: 0, needs_action: 0, completed: 0, all: 0, archived: 0 });
     }, [jobs]);
 
     const handleEvaluate = async (jobId) => {
@@ -296,6 +306,9 @@ export default function ReviewerQueue() {
                         const outcomesTotal = Number(progress?.outcomes_total || job.outcomes?.length || 0);
                         const outcomesReady = Number(progress?.outcomes_evaluated || 0);
                         const failedCount = statusCount(progress, 'failed');
+                        const readyReports = evaluatedOutcomes(progress);
+                        const pendingOutcomes = (progress?.outcome_statuses || []).filter((outcome) => outcome.status !== 'evaluated');
+                        const firstReport = readyReports[0];
 
                         return (
                             <div
@@ -381,21 +394,45 @@ export default function ReviewerQueue() {
                                             </div>
                                         )}
 
-                                        {progress?.outcome_statuses?.length > 0 && (
+                                        {readyReports.length > 0 && (
+                                            <div className="rounded-xl border border-green-100 bg-green-50/60 p-3">
+                                                <div className="flex items-center justify-between gap-3 mb-2">
+                                                    <div className="inline-flex items-center gap-2 text-sm font-bold text-green-800">
+                                                        <FileText className="w-4 h-4" />
+                                                        Reports Ready
+                                                    </div>
+                                                    <span className="text-xs font-semibold text-green-700">
+                                                        {readyReports.length}/{outcomesTotal}
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {readyReports.map((outcome) => (
+                                                        <Link
+                                                            key={outcome.outcome_id}
+                                                            to={`/evaluation/${outcome.outcome_id}`}
+                                                            state={{ anonymized }}
+                                                            className="inline-flex max-w-full items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-green-800 border border-green-200 hover:border-green-300 hover:bg-green-100"
+                                                        >
+                                                            <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                                                            <span className="truncate">{outcome.title}</span>
+                                                            <span className="shrink-0 text-green-600">View Report</span>
+                                                        </Link>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {pendingOutcomes.length > 0 && (
                                             <div className="flex flex-wrap gap-2">
-                                                {progress.outcome_statuses.map((outcome) => (
+                                                {pendingOutcomes.map((outcome) => (
                                                     <Link
                                                         key={outcome.outcome_id}
                                                         to={`/dashboard/${outcome.outcome_id}`}
                                                         state={{ anonymized }}
-                                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                                                            outcome.status === 'evaluated'
-                                                                ? 'bg-green-50 text-green-700 border border-green-200'
-                                                                : 'bg-gray-50 text-gray-600 border border-gray-200'
-                                                        }`}
+                                                        className="inline-flex max-w-full items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100"
                                                     >
-                                                        {outcome.status === 'evaluated' ? <CheckCircle className="w-3 h-3" /> : null}
-                                                        {outcome.title}: {outcome.status}
+                                                        <span className="truncate">{outcome.title}</span>
+                                                        <span className="shrink-0">pending</span>
                                                     </Link>
                                                 ))}
                                             </div>
@@ -433,10 +470,11 @@ export default function ReviewerQueue() {
                                                 )}
                                             </div>
                                             <Link
-                                                to={`/jobs/${job.id}#outcomes`}
+                                                to={firstReport ? `/evaluation/${firstReport.outcome_id}` : `/jobs/${job.id}#outcomes`}
+                                                state={{ anonymized }}
                                                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200"
                                             >
-                                                View Outcomes
+                                                {firstReport ? 'View Reports' : 'View Outcomes'}
                                                 <ChevronRight className="w-4 h-4" />
                                             </Link>
                                         </div>

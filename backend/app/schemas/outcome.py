@@ -23,6 +23,13 @@ class OutcomeCreate(BaseModel):
     source_template_id: Optional[str] = None
     tasks: List[TaskCreate] = []
 
+class OutcomeUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    proof_type: Optional[str] = None
+    status: Optional[str] = None
+    tasks: Optional[List[TaskCreate]] = None
+
 class OutcomeResponse(OutcomeCreate):
     model_config = ConfigDict(from_attributes=True)
 
