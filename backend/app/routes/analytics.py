@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.models.feedback import Feedback
 from app.models.outcome import Outcome
+from app.models.evaluation import Evaluation
 
 from typing import List, Dict, Any
 import json
@@ -14,16 +15,31 @@ def get_hiring_decisions(db: Session = Depends(get_db)):
     """
     Get a history of all human hiring decisions.
     """
-    # Join Feedback and Outcome
-    results = db.query(Feedback, Outcome).join(Outcome, Feedback.job_id == Outcome.id).order_by(Feedback.created_at.desc()).all()
+    results = db.query(Feedback, Outcome, Evaluation).join(
+        Outcome,
+        Feedback.job_id == Outcome.id,
+    ).outerjoin(
+        Evaluation,
+        Feedback.evaluation_id == Evaluation.id,
+    ).order_by(Feedback.created_at.desc()).all()
     
     history = []
-    for feedback, outcome in results:
+    for feedback, outcome, evaluation in results:
         # Parse metrics safely
         metrics = feedback.metrics_json or {}
         
         # Determine candidate name
-        candidate = metrics.get('selected_candidate', 'Unknown')
+        selected = metrics.get('selected_candidate')
+        selected_list = metrics.get('selected_candidates') or []
+        rejected_list = metrics.get('rejected_candidates') or []
+        if selected:
+            candidate = selected
+        elif selected_list:
+            candidate = ", ".join(selected_list)
+        elif rejected_list:
+            candidate = ", ".join(rejected_list)
+        else:
+            candidate = "All candidates" if metrics.get("action_taken") == "reject_all" else "Unknown"
         
         # Determine action
         action_raw = metrics.get('action_taken', 'unknown')
@@ -36,8 +52,11 @@ def get_hiring_decisions(db: Session = Depends(get_db)):
             "company": outcome.company,
             "candidate": candidate,
             "outcome_id": outcome.id,
+            "job_id": outcome.job_id,
+            "evaluation_id": evaluation.id if evaluation else feedback.evaluation_id,
             "decision": action_label,
-            "raw_action": action_raw
+            "raw_action": action_raw,
+            "details_path": f"/evaluation/{outcome.id}",
         })
         
     return history

@@ -3,6 +3,18 @@ import { Settings, History, FileText, AlertTriangle, RefreshCw, ChevronDown, Che
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+const fetchJson = async (path) => {
+    const response = await fetch(`${API_BASE}${path}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+    });
+    if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || payload.message || `Failed to fetch ${path}`);
+    }
+    return response.json();
+};
+
 export default function Admin() {
     const [activeTab, setActiveTab] = useState('weights');
     const [weights, setWeights] = useState([]);
@@ -11,34 +23,32 @@ export default function Admin() {
     const [auditLogs, setAuditLogs] = useState([]);
     const [llmLogs, setLlmLogs] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
     const [expandedLog, setExpandedLog] = useState(null);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
+        setError('');
         try {
             if (activeTab === 'weights') {
-                const res = await fetch(`${API_BASE}/admin/signal-weights`);
-                const data = await res.json();
-                setWeights(data);
+                const data = await fetchJson('/admin/signal-weights');
+                setWeights(Array.isArray(data) ? data : []);
 
-                const histRes = await fetch(`${API_BASE}/admin/weight-history`);
-                const histData = await histRes.json();
+                const histData = await fetchJson('/admin/weight-history');
                 setWeightHistory(histData.history || []);
             } else if (activeTab === 'tasks') {
-                const res = await fetch(`${API_BASE}/admin/task-weight-history`);
-                const data = await res.json();
-                setTaskWeightHistory(data);
+                const data = await fetchJson('/admin/task-weight-history');
+                setTaskWeightHistory(Array.isArray(data) ? data : []);
             } else if (activeTab === 'audit') {
-                const res = await fetch(`${API_BASE}/admin/audit-logs`);
-                const data = await res.json();
-                setAuditLogs(data);
+                const data = await fetchJson('/admin/audit-logs');
+                setAuditLogs(Array.isArray(data) ? data : []);
             } else if (activeTab === 'llm') {
-                const res = await fetch(`${API_BASE}/admin/llm-logs`);
-                const logData = await res.json();
-                setLlmLogs(logData);
+                const logData = await fetchJson('/admin/llm-logs');
+                setLlmLogs(Array.isArray(logData) ? logData : []);
             }
         } catch (error) {
             console.error('Error fetching data:', error);
+            setError(error.message || 'Failed to load admin data');
         }
         setLoading(false);
     }, [activeTab]);
@@ -95,6 +105,12 @@ export default function Admin() {
 
             {/* Content */}
             <div className="card min-h-[500px]">
+                {error && (
+                    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4" />
+                        {error}
+                    </div>
+                )}
                 {loading ? (
                     <div className="flex items-center justify-center py-12">
                         <RefreshCw className="w-8 h-8 animate-spin text-primary" />

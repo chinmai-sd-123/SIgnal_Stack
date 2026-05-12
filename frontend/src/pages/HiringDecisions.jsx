@@ -217,7 +217,8 @@ export default function HiringDecisions() {
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <button
-                                                onClick={() => navigate(`/evaluation/${record.job_id}`)}
+                                                onClick={() => navigate(record.details_path || `/evaluation/${record.outcome_id}`)}
+                                                disabled={!record.details_path && !record.outcome_id}
                                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-primary hover:text-primary-hover bg-primary-soft hover:bg-primary/10 rounded-lg transition-all group-hover:shadow-sm"
                                             >
                                                 <ExternalLink className="w-3.5 h-3.5" />

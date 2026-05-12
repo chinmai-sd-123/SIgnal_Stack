@@ -198,6 +198,15 @@ def get_job_evaluation_queue_size(job_id: Optional[str] = None) -> int:
     return size
 
 
+def has_running_job_evaluation(progress: Dict[str, Any]) -> bool:
+    """Return true only when a worker is actually queued/processing a job."""
+    evaluating_count = max(
+        int((progress.get("submission_status_counts") or {}).get("evaluating", 0) or 0),
+        int((progress.get("candidate_status_counts") or {}).get("evaluating", 0) or 0),
+    )
+    return bool(progress.get("queue_active")) or evaluating_count > 0
+
+
 def candidate_id_for_submission(submission: InviteSubmission) -> str:
     return submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
 
@@ -392,6 +401,11 @@ def _recover_interrupted_evaluations(db, job_id: str) -> int:
         db.commit()
 
     return recovered
+
+
+def recover_stale_job_evaluations(db, job_id: str) -> int:
+    """Public wrapper used by API routes before deciding whether to enqueue."""
+    return _recover_interrupted_evaluations(db, job_id)
 
 
 def _screen_submission(db, submission: InviteSubmission, extractor: SignalExtractor) -> Dict[str, Any]:

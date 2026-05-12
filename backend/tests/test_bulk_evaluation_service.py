@@ -240,6 +240,31 @@ def test_job_evaluation_queue_size_is_scoped_to_job(monkeypatch):
 
 
 @pytest.mark.unit
+def test_queued_only_progress_can_be_reenqueued():
+    progress = {
+        "queue_active": False,
+        "submission_status_counts": {"queued": 1},
+        "candidate_status_counts": {"queued": 1},
+    }
+
+    assert bulk.has_running_job_evaluation(progress) is False
+
+
+@pytest.mark.unit
+def test_evaluating_or_worker_progress_is_running():
+    assert bulk.has_running_job_evaluation({
+        "queue_active": False,
+        "submission_status_counts": {"evaluating": 1},
+        "candidate_status_counts": {},
+    }) is True
+    assert bulk.has_running_job_evaluation({
+        "queue_active": True,
+        "submission_status_counts": {"queued": 1},
+        "candidate_status_counts": {"queued": 1},
+    }) is True
+
+
+@pytest.mark.unit
 def test_recover_interrupted_evaluations_requeues_stuck_rows():
     submission = InviteSubmission(id="sub-1", job_id="job-1", status="evaluating")
     candidate = JobCandidate(

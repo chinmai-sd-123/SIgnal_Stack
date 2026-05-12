@@ -88,6 +88,11 @@ def test_feedback_records_learning_history(client, monkeypatch):
     saved_feedback = next(item for item in feedback_list if item["job_id"] == outcome_id)
     assert saved_feedback["id"] == feedback_resp.json()["feedback_id"]
 
+    decisions = client.get("/analytics/decisions").json()
+    decision = next(item for item in decisions if item["outcome_id"] == outcome_id)
+    assert decision["details_path"] == f"/evaluation/{outcome_id}"
+    assert decision["evaluation_id"] is not None
+
     history = client.get("/admin/weight-history").json()["history"]
     assert any(item["feedback_id"] == feedback_resp.json()["feedback_id"] for item in history)
 

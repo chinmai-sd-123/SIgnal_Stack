@@ -12,9 +12,12 @@ from app.utils.time_utils import utc_now
 from app.services.shortlist_service import ShortlistService
 from app.services.bulk_evaluation_service import (
     get_job_evaluation_progress,
+    has_running_job_evaluation,
     mark_job_submissions_queued,
     queue_job_evaluation,
+    recover_stale_job_evaluations,
 )
+from app.services import crud
 from app.services.submission_proof_service import sync_job_invite_proofs
 
 router = APIRouter()
@@ -217,7 +220,16 @@ def queue_job_applications_for_evaluation(
 
     sync_job_invite_proofs(db, job_id)
     progress = get_job_evaluation_progress(db, job_id)
-    if (progress.get("active_count", 0) > 0 or progress.get("queue_active")) and not rerun_evaluated:
+    evaluating_count = max(
+        int((progress.get("submission_status_counts") or {}).get("evaluating", 0) or 0),
+        int((progress.get("candidate_status_counts") or {}).get("evaluating", 0) or 0),
+    )
+
+    if not progress.get("queue_active") and evaluating_count > 0:
+        recover_stale_job_evaluations(db, job_id)
+        progress = get_job_evaluation_progress(db, job_id)
+
+    if has_running_job_evaluation(progress) and not rerun_evaluated:
         return {
             "job_id": job_id,
             "task_id": None,
@@ -236,6 +248,11 @@ def queue_job_applications_for_evaluation(
     )
 
     if queued_count == 0 and (not include_deep_evaluation or progress.get("evaluated_count", 0) == 0):
+        crud.create_audit_log(db, "job_evaluation", job_id, "queue_skipped", {
+            "reason": "No submissions need evaluation",
+            "deep_limit": max(0, deep_limit),
+            "include_deep_evaluation": include_deep_evaluation,
+        })
         return {
             "job_id": job_id,
             "task_id": None,
@@ -252,6 +269,16 @@ def queue_job_applications_for_evaluation(
         candidate_limit=int(candidate_limit) if candidate_limit else None,
         include_deep_evaluation=include_deep_evaluation,
     )
+
+    crud.create_audit_log(db, "job_evaluation", job_id, "queued", {
+        "task_id": task_id,
+        "queued_count": queued_count,
+        "deep_limit": max(0, deep_limit),
+        "candidate_limit": int(candidate_limit) if candidate_limit else None,
+        "include_deep_evaluation": include_deep_evaluation,
+        "rerun_evaluated": rerun_evaluated,
+        "retry_failed_only": retry_failed_only,
+    })
 
     return {
         "job_id": job_id,
