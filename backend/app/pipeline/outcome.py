@@ -32,14 +32,14 @@ class OutcomePipeline:
         # 0. Check for "Save as Template" Flag (Recursive Creation)
         if outcome.save_as_template and not outcome.is_template:
             # 1. Create the Master Template first
-            template_create = outcome.copy()
+            template_create = outcome.model_copy()
             template_create.save_as_template = False
             template_create.is_template = 1
             template_create.source_template_id = None
             
-            # Recursively create the template
-            # We don't link it to a job_id (it's a master)
-            master_template = crud.create_outcome(self.db, template_create, job_id="template_master")
+            # Master templates are reusable across jobs, so they intentionally
+            # have no job_id. Using a sentinel id breaks the outcomes -> jobs FK.
+            master_template = crud.create_outcome(self.db, template_create, job_id=None)
             
             # 2. Now Create the Instance linked to this new template
             # We use the instantiation logic to ensure consistency
