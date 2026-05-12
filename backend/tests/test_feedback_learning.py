@@ -97,3 +97,73 @@ def test_feedback_records_learning_history(client, monkeypatch):
     task_history_resp = client.get("/admin/task-weight-history")
     assert task_history_resp.status_code == 200
     assert isinstance(task_history_resp.json(), list)
+
+    task_feedback_resp = client.post(
+        "/feedback/task-weight",
+        json={
+            "job_id": outcome_id,
+            "task_name": "Implement API",
+            "direction": "penalize",
+            "reason": "Needs stronger API implementation evidence",
+        },
+    )
+    assert task_feedback_resp.status_code == 200
+    task_feedback = task_feedback_resp.json()
+    assert task_feedback["status"] == "success"
+    assert task_feedback["new_weights"]["Implement API"] == 0.85
+
+    task_history = client.get("/admin/task-weight-history").json()
+    matching_history = [
+        item for item in task_history
+        if item["feedback_source_job_id"] == outcome_id and item["task_name"] == "Implement API"
+    ]
+    assert matching_history
+    assert matching_history[0]["outcome_title"] == "API Platform"
+    assert matching_history[0]["reason"] == "Needs stronger API implementation evidence"
+
+    audit_logs = client.get("/admin/audit-logs").json()
+    assert any(log["entity_type"] == "task_feedback" and log["entity_id"] == outcome_id for log in audit_logs)
+
+    invalid_task_resp = client.post(
+        "/feedback/task-weight",
+        json={
+            "job_id": outcome_id,
+            "task_name": "Missing task",
+            "direction": "boost",
+            "reason": "Should fail clearly",
+        },
+    )
+    assert invalid_task_resp.status_code == 400
+    assert "Missing task" in invalid_task_resp.json()["detail"]
+
+
+@pytest.mark.integration
+def test_task_feedback_boost_at_max_does_not_reduce_weight(client):
+    outcome_resp = client.post(
+        "/outcomes",
+        json={
+            "title": "Max Weight Outcome",
+            "description": "Check stable boost behavior",
+            "company": "SignalStack",
+            "location": "Remote",
+            "category": "Software Engineering",
+            "job_type": "Full-time",
+            "tasks": [{"name": "Already Max", "priority": "High", "weight": 1.0}],
+        },
+    )
+    assert outcome_resp.status_code == 200
+    outcome_id = outcome_resp.json()["id"]
+
+    task_feedback_resp = client.post(
+        "/feedback/task-weight",
+        json={
+            "job_id": outcome_id,
+            "task_name": "Already Max",
+            "direction": "boost",
+            "reason": "Keep important",
+        },
+    )
+    assert task_feedback_resp.status_code == 200
+    data = task_feedback_resp.json()
+    assert data["new_weights"]["Already Max"] == 1.0
+    assert "maximum" in " ".join(data["changes"])

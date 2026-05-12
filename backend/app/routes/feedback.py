@@ -60,6 +60,13 @@ def trigger_task_learning(request: schemas.TaskWeightFeedbackRequest, db: Sessio
     loop = FeedbackLoop(db)
     try:
         result = loop.process_task_feedback(request)
+        crud.create_audit_log(db, "task_feedback", request.job_id, "recorded", {
+            "task_name": request.task_name,
+            "direction": request.direction,
+            "reason": request.reason,
+            "changes": result.get("changes", []),
+        })
+        track_feedback()
         return result
     except ValueError as e:
         # Check if it is a nice error or crash
@@ -87,21 +94,31 @@ def get_feedback_list(db: Session = Depends(get_db)):
 
 @router.get("/admin/task-weight-history")
 def get_task_weight_history(limit: int = 100, db: Session = Depends(get_db)):
+    from app.models.outcome import Outcome
     from app.models.task import TaskWeightHistory
+    from app.models.task import Task
 
-    rows = db.query(TaskWeightHistory).order_by(TaskWeightHistory.created_at.desc()).limit(limit).all()
+    rows = db.query(TaskWeightHistory, Task, Outcome).outerjoin(
+        Task,
+        Task.id == TaskWeightHistory.task_id,
+    ).outerjoin(
+        Outcome,
+        Outcome.id == TaskWeightHistory.outcome_id,
+    ).order_by(TaskWeightHistory.created_at.desc()).limit(limit).all()
     return [
         {
-            "id": row.id,
-            "task_id": row.task_id,
-            "outcome_id": row.outcome_id,
-            "old_weight": row.old_weight,
-            "new_weight": row.new_weight,
-            "reason": row.reason,
-            "feedback_source_job_id": row.feedback_source_job_id,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "id": history.id,
+            "task_id": history.task_id,
+            "task_name": task.name if task else history.task_id,
+            "outcome_id": history.outcome_id,
+            "outcome_title": outcome.title if outcome else history.outcome_id,
+            "old_weight": history.old_weight,
+            "new_weight": history.new_weight,
+            "reason": history.reason,
+            "feedback_source_job_id": history.feedback_source_job_id,
+            "created_at": history.created_at.isoformat() if history.created_at else None,
         }
-        for row in rows
+        for history, task, outcome in rows
     ]
 
 @router.get("/admin/llm-logs")

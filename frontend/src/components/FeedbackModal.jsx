@@ -39,7 +39,13 @@ export default function FeedbackModal({ isOpen, onClose, job, tasks }) {
                 return;
             }
 
-            await Promise.all(promises);
+            const results = await Promise.all(promises);
+            window.dispatchEvent(new CustomEvent('signalstack:learning-updated', {
+                detail: {
+                    source: 'task-feedback',
+                    results,
+                },
+            }));
             onClose();
             setTaskFeedback({}); // Reset
             alert(`System updated! weights adjusted.`);

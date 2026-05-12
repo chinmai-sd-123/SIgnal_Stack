@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, ArrowRight, Activity, Clock } from 'lucide-react';
 import { getSignalWeights, getTaskWeightHistory, getWeightHistory } from '../api';
 
@@ -8,25 +8,33 @@ export default function FeedbackView() {
     const [taskHistory, setTaskHistory] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        async function loadWeights() {
-            try {
-                const [weightData, historyData, taskHistoryData] = await Promise.all([
-                    getSignalWeights(),
-                    getWeightHistory(100),
-                    getTaskWeightHistory(100),
-                ]);
-                setWeights(weightData);
-                setHistory(historyData.history || []);
-                setTaskHistory(taskHistoryData || []);
-            } catch (error) {
-                console.error("Failed to load weights", error);
-            } finally {
-                setLoading(false);
-            }
+    const loadWeights = useCallback(async ({ silent = false } = {}) => {
+        if (!silent) setLoading(true);
+        try {
+            const [weightData, historyData, taskHistoryData] = await Promise.all([
+                getSignalWeights(),
+                getWeightHistory(100),
+                getTaskWeightHistory(100),
+            ]);
+            setWeights(weightData);
+            setHistory(historyData.history || []);
+            setTaskHistory(taskHistoryData || []);
+        } catch (error) {
+            console.error("Failed to load weights", error);
+        } finally {
+            setLoading(false);
         }
-        loadWeights();
     }, []);
+
+    useEffect(() => {
+        loadWeights();
+    }, [loadWeights]);
+
+    useEffect(() => {
+        const refreshLearning = () => loadWeights({ silent: true });
+        window.addEventListener('signalstack:learning-updated', refreshLearning);
+        return () => window.removeEventListener('signalstack:learning-updated', refreshLearning);
+    }, [loadWeights]);
 
     const latestBySignal = history.reduce((acc, item) => {
         if (!acc[item.signal_name]) acc[item.signal_name] = item;
@@ -150,10 +158,10 @@ export default function FeedbackView() {
                                     return (
                                         <tr key={item.id}>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 font-mono">
-                                                {item.task_id}
+                                                {item.task_name || item.task_id}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
-                                                {item.outcome_id}
+                                                {item.outcome_title || item.outcome_id}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                 <div className="flex items-center gap-2">

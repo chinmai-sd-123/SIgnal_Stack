@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Settings, History, FileText, AlertTriangle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Settings, History, FileText, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, Activity } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -7,6 +7,7 @@ export default function Admin() {
     const [activeTab, setActiveTab] = useState('weights');
     const [weights, setWeights] = useState([]);
     const [weightHistory, setWeightHistory] = useState([]);
+    const [taskWeightHistory, setTaskWeightHistory] = useState([]);
     const [auditLogs, setAuditLogs] = useState([]);
     const [llmLogs, setLlmLogs] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -23,6 +24,10 @@ export default function Admin() {
                 const histRes = await fetch(`${API_BASE}/admin/weight-history`);
                 const histData = await histRes.json();
                 setWeightHistory(histData.history || []);
+            } else if (activeTab === 'tasks') {
+                const res = await fetch(`${API_BASE}/admin/task-weight-history`);
+                const data = await res.json();
+                setTaskWeightHistory(data);
             } else if (activeTab === 'audit') {
                 const res = await fetch(`${API_BASE}/admin/audit-logs`);
                 const data = await res.json();
@@ -44,6 +49,7 @@ export default function Admin() {
 
     const tabs = [
         { id: 'weights', label: 'Signal Weights', icon: Settings },
+        { id: 'tasks', label: 'Task Learning', icon: Activity },
         { id: 'audit', label: 'Audit Logs', icon: History },
         { id: 'llm', label: 'LLM Logs', icon: FileText },
     ];
@@ -136,6 +142,36 @@ export default function Admin() {
                                             ))
                                         )}
                                     </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Task Learning Tab */}
+                        {activeTab === 'tasks' && (
+                            <div>
+                                <h2 className="heading-2 mb-4">Task Weight History</h2>
+                                <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                                    {taskWeightHistory.length === 0 ? (
+                                        <p className="text-gray-400 text-center py-8">No task learning recorded yet</p>
+                                    ) : (
+                                        taskWeightHistory.map((item) => (
+                                            <div key={item.id} className="bg-gray-50 rounded-lg p-4 border border-gray-100">
+                                                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                                    <div>
+                                                        <div className="font-semibold text-gray-900">{item.task_name || item.task_id}</div>
+                                                        <div className="text-xs text-gray-500 mt-1">{item.outcome_title || item.outcome_id}</div>
+                                                    </div>
+                                                    <div className="flex flex-wrap items-center gap-3">
+                                                        <span className="badge badge-neutral">
+                                                            {Number(item.old_weight || 0).toFixed(2)} -&gt; {Number(item.new_weight || 0).toFixed(2)}
+                                                        </span>
+                                                        <span className="text-xs text-gray-500">{item.reason || 'No reason provided'}</span>
+                                                        <span className="text-xs text-gray-400">{item.created_at?.split('T')[0]}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
                                 </div>
                             </div>
                         )}

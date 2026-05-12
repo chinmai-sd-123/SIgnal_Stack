@@ -1,6 +1,7 @@
 import logging
 from typing import List, Dict, Any
 
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 import app.models as models
 import app.schemas as schemas
@@ -15,37 +16,37 @@ class FeedbackLoop:
 
     def process_feedback(self, feedback: models.Feedback) -> List[str]:
         changes = []
-        if feedback.evaluation_id:
-            eval_id = None
-            if isinstance(feedback.evaluation_id, int):
-                eval_id = feedback.evaluation_id
-            elif isinstance(feedback.evaluation_id, str) and feedback.evaluation_id.isdigit():
-                eval_id = int(feedback.evaluation_id)
-            
-            eval_db = None
-            if eval_id:
-                eval_db = self.db.query(models.Evaluation).filter(models.Evaluation.id == eval_id).first()
-            
-            if not eval_db and feedback.job_id:
-                 eval_db = self.db.query(models.Evaluation).filter(models.Evaluation.job_id == feedback.job_id).first()
-                 
-            if eval_db:
-                eval_data = eval_db.evaluation_json
-                signals_used = eval_data.get("global_signals_used", [])
-                
-                # Adjust weights based on result
-                feedback_score = 1.0 if feedback.result == "success" else -1.0
-                
-                for signal in signals_used:
-                    result = update_weight(
-                        self.db,
-                        signal_name=signal,
-                        feedback_score=feedback_score,
-                        feedback_id=feedback.id,
-                    )
-                    changes.append(
-                        f"Updated {signal}: {result['old_weight']:.2f} -> {result['new_weight']:.2f}"
-                    )
+        eval_id = None
+        if isinstance(feedback.evaluation_id, int):
+            eval_id = feedback.evaluation_id
+        elif isinstance(feedback.evaluation_id, str) and feedback.evaluation_id.isdigit():
+            eval_id = int(feedback.evaluation_id)
+
+        eval_db = None
+        if eval_id:
+            eval_db = self.db.query(models.Evaluation).filter(models.Evaluation.id == eval_id).first()
+
+        if not eval_db and feedback.job_id:
+            eval_db = self.db.query(models.Evaluation).filter(
+                models.Evaluation.job_id == feedback.job_id
+            ).order_by(desc(models.Evaluation.created_at)).first()
+
+        if eval_db:
+            eval_data = eval_db.evaluation_json or {}
+            signals_used = eval_data.get("global_signals_used", [])
+
+            feedback_score = 1.0 if feedback.result == "success" else -1.0
+
+            for signal in signals_used:
+                result = update_weight(
+                    self.db,
+                    signal_name=signal,
+                    feedback_score=feedback_score,
+                    feedback_id=feedback.id,
+                )
+                changes.append(
+                    f"Updated {signal}: {result['old_weight']:.2f} -> {result['new_weight']:.2f}"
+                )
         
         if not changes:
             changes.append("No signals found to update")
@@ -73,9 +74,9 @@ class FeedbackLoop:
             
             # Calc new weight
             if request.direction == "boost":
-                new_inst_weight = min(0.9, old_inst_weight + DELTA)
+                new_inst_weight = min(1.0, old_inst_weight + DELTA)
             else:
-                new_inst_weight = max(0.1, old_inst_weight - DELTA)
+                new_inst_weight = max(0.05, old_inst_weight - DELTA)
             
             actual_delta_inst = new_inst_weight - old_inst_weight
             
@@ -84,6 +85,14 @@ class FeedbackLoop:
                 instance_task.weight = new_inst_weight
                 self.db.add(instance_task)
                 changes_log.append(f"[Current Job] Updated '{instance_task.name}': {old_inst_weight:.2f} -> {new_inst_weight:.2f}")
+                self._log_history(
+                    instance_task.id,
+                    outcome_instance.id,
+                    old_inst_weight,
+                    new_inst_weight,
+                    request.reason or f"{request.direction} via feedback",
+                    request.job_id,
+                )
                 
                 # Redistribute in Instance
                 other_inst_tasks = [t for t in outcome_instance.tasks if t.id != instance_task.id]
@@ -96,7 +105,11 @@ class FeedbackLoop:
                         t.weight = max(0.05, t.weight - reduction)
                         self.db.add(t)
         else:
-            changes_log.append(f"WARNING: Task '{request.task_name}' not found in current job instance.")
+            raise ValueError(f"Task '{request.task_name}' not found in current job instance.")
+
+        if instance_task and actual_delta_inst == 0:
+            boundary = "maximum" if request.direction == "boost" else "minimum"
+            changes_log.append(f"[Current Job] '{instance_task.name}' is already at the {boundary} weight.")
 
         # === SCOPE B: Update MASTER TEMPLATE (Future Jobs) ===
         master_template_id = outcome_instance.source_template_id
@@ -116,9 +129,9 @@ class FeedbackLoop:
                     
                     # Calc new weight (same logic)
                     if request.direction == "boost":
-                        new_master_weight = min(0.9, old_master_weight + DELTA)
+                        new_master_weight = min(1.0, old_master_weight + DELTA)
                     else:
-                        new_master_weight = max(0.1, old_master_weight - DELTA)
+                        new_master_weight = max(0.05, old_master_weight - DELTA)
                         
                     actual_delta_master = new_master_weight - old_master_weight
                     
@@ -145,6 +158,9 @@ class FeedbackLoop:
                                 reduction = actual_delta_master * share
                                 t.weight = max(0.05, t.weight - reduction)
                                 self.db.add(t)
+                    else:
+                        boundary = "maximum" if request.direction == "boost" else "minimum"
+                        changes_log.append(f"[Master Template] '{master_task.name}' is already at the {boundary} weight.")
             else:
                 changes_log.append("Master template ID found but template missing in DB.")
         else:
