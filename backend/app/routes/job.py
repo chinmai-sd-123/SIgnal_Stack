@@ -13,9 +13,11 @@ from app.utils.slug_utils import slugify
 from app.utils.time_utils import utc_now
 from app.services.shortlist_service import ShortlistService
 from app.services.bulk_evaluation_service import (
+    clear_job_evaluation_queue,
     get_job_evaluation_progress,
     has_running_job_evaluation,
     mark_job_submissions_queued,
+    progress_indicates_complete,
     queue_job_evaluation,
     recover_stale_job_evaluations,
 )
@@ -297,6 +299,24 @@ def queue_job_applications_for_evaluation(
         recover_stale_job_evaluations(db, job_id)
         progress = get_job_evaluation_progress(db, job_id)
 
+    if progress_indicates_complete(progress) and not rerun_evaluated and not retry_failed_only:
+        cleared_count = clear_job_evaluation_queue(job_id, reason="queue_clicked_after_complete")
+        crud.create_audit_log(db, "job_evaluation", job_id, "queue_skipped", {
+            "reason": "Job evaluation already complete",
+            "cleared_stale_queue_items": cleared_count,
+            "deep_limit": max(0, deep_limit),
+            "include_deep_evaluation": include_deep_evaluation,
+        })
+        return {
+            "job_id": job_id,
+            "task_id": None,
+            "queued_count": 0,
+            "deep_limit": max(0, deep_limit),
+            "include_deep_evaluation": include_deep_evaluation,
+            "message": "Evaluation already complete",
+            "progress": get_job_evaluation_progress(db, job_id),
+        }
+
     if has_running_job_evaluation(progress) and not rerun_evaluated:
         queued_count = mark_job_submissions_queued(
             db,
@@ -342,7 +362,7 @@ def queue_job_applications_for_evaluation(
     )
 
     report_refresh_needed = include_deep_evaluation and _report_refresh_needed(progress)
-    if queued_count == 0 and not report_refresh_needed and (not include_deep_evaluation or progress.get("evaluated_count", 0) == 0):
+    if queued_count == 0 and not report_refresh_needed:
         crud.create_audit_log(db, "job_evaluation", job_id, "queue_skipped", {
             "reason": "No submissions need evaluation",
             "deep_limit": max(0, deep_limit),

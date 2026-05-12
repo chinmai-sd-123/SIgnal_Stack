@@ -179,6 +179,20 @@ class _FakeRedis:
             return items[start:]
         return items[start:end + 1]
 
+    def lrem(self, key, count, value):
+        items = self.lists.get(key, [])
+        removed = 0
+        remaining = []
+        limit = abs(count)
+        for item in items:
+            should_remove = item == value and (count == 0 or removed < limit)
+            if should_remove:
+                removed += 1
+            else:
+                remaining.append(item)
+        self.lists[key] = remaining
+        return removed
+
 
 class _NoCloseSession:
     def __init__(self, session):
@@ -373,6 +387,54 @@ def test_pending_redis_job_queue_wakes_worker(monkeypatch):
 
     assert bulk.ensure_redis_job_evaluation_worker_for_pending("job-1") is True
     assert starts == [True]
+
+
+@pytest.mark.unit
+def test_completed_job_progress_clears_stale_redis_queue(monkeypatch):
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(bulk.cache, "redis_client", fake_redis)
+
+    fake_redis.lpush(bulk.REDIS_JOB_EVAL_QUEUE, '{"task_id":"task-complete","job_id":"job-1"}')
+    fake_redis.lpush(bulk.REDIS_JOB_EVAL_PROCESSING, '{"task_id":"task-other","job_id":"job-2"}')
+
+    complete_progress = {
+        "submissions_total": 2,
+        "evaluated_count": 2,
+        "outcomes_total": 1,
+        "outcomes_evaluated": 1,
+        "active_count": 0,
+        "submission_status_counts": {"evaluated": 2},
+        "candidate_status_counts": {"evaluated": 2},
+    }
+
+    assert bulk.progress_indicates_complete(complete_progress) is True
+    assert bulk.clear_job_evaluation_queue("job-1", reason="test_complete") == 1
+    assert bulk.get_job_evaluation_queue_size("job-1") == 0
+    assert bulk.get_job_evaluation_queue_size("job-2") == 1
+    assert any("task-complete" in value for _, value in fake_redis.values.values())
+
+
+@pytest.mark.unit
+def test_progress_not_complete_when_report_missing_or_candidates_active():
+    assert bulk.progress_indicates_complete({
+        "submissions_total": 2,
+        "evaluated_count": 2,
+        "outcomes_total": 1,
+        "outcomes_evaluated": 0,
+        "active_count": 0,
+        "submission_status_counts": {"evaluated": 2},
+        "candidate_status_counts": {"evaluated": 2},
+    }) is False
+
+    assert bulk.progress_indicates_complete({
+        "submissions_total": 2,
+        "evaluated_count": 2,
+        "outcomes_total": 1,
+        "outcomes_evaluated": 1,
+        "active_count": 1,
+        "submission_status_counts": {"evaluated": 1, "queued": 1},
+        "candidate_status_counts": {"evaluated": 1, "queued": 1},
+    }) is False
 
 
 @pytest.mark.unit

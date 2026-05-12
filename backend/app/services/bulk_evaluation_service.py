@@ -150,13 +150,17 @@ def get_job_evaluation_queue_backend() -> str:
 
 
 def _redis_payload_job_id(item: Any) -> Optional[str]:
+    payload = _redis_payload(item)
+    return payload.get("job_id") if payload else None
+
+
+def _redis_payload(item: Any) -> Optional[Dict[str, Any]]:
     if isinstance(item, bytes):
         item = item.decode("utf-8")
     try:
-        payload = json.loads(item)
+        return json.loads(item)
     except Exception:
         return None
-    return payload.get("job_id")
 
 
 def _count_redis_job_queue_items(job_id: Optional[str]) -> int:
@@ -174,6 +178,62 @@ def _count_redis_job_queue_items(job_id: Optional[str]) -> int:
             if _redis_payload_job_id(item) == job_id:
                 count += 1
     return count
+
+
+def clear_job_evaluation_queue(job_id: str, reason: str = "completed") -> int:
+    """
+    Remove stale Redis queue entries for a job.
+
+    This is intentionally conservative and is called only after the database
+    says all submissions are evaluated and all outcome reports are current.
+    It fixes the UI case where a duplicate Redis task keeps showing
+    "Processing queue: 1" even though the report is already ready.
+    """
+    if not _redis_available() or not job_id:
+        return 0
+
+    removed = 0
+    try:
+        for key in (REDIS_JOB_EVAL_QUEUE, REDIS_JOB_EVAL_PROCESSING):
+            for item in list(cache.redis_client.lrange(key, 0, -1)):
+                payload = _redis_payload(item)
+                if not payload or payload.get("job_id") != job_id:
+                    continue
+
+                removed += int(cache.redis_client.lrem(key, 0, item) or 0)
+                task_id = payload.get("task_id")
+                if task_id:
+                    _set_redis_task_status(
+                        task_id,
+                        "skipped",
+                        job_id=job_id,
+                        reason=reason,
+                    )
+    except Exception as exc:
+        logger.warning("Could not clear completed Redis evaluation queue for %s: %s", job_id, exc)
+    return removed
+
+
+def progress_indicates_complete(progress: Dict[str, Any]) -> bool:
+    """True when no useful queue work remains for this job."""
+    submissions_total = int(progress.get("submissions_total") or 0)
+    evaluated_count = int(progress.get("evaluated_count") or 0)
+    outcomes_total = int(progress.get("outcomes_total") or 0)
+    outcomes_evaluated = int(progress.get("outcomes_evaluated") or 0)
+    active_count = int(progress.get("active_count") or 0)
+
+    if submissions_total <= 0 or evaluated_count < submissions_total or active_count > 0:
+        return False
+    if outcomes_total > 0 and outcomes_evaluated < outcomes_total:
+        return False
+
+    incomplete_statuses = {"applied", "submitted", "queued", "evaluating", "failed"}
+    for counts_key in ("submission_status_counts", "candidate_status_counts"):
+        counts = progress.get(counts_key) or {}
+        if any(int(counts.get(status) or 0) > 0 for status in incomplete_statuses):
+            return False
+
+    return True
 
 
 def ensure_redis_job_evaluation_worker_for_pending(job_id: Optional[str] = None) -> bool:
@@ -780,9 +840,6 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
         if not current or (item.created_at or utc_now()) > (current.created_at or utc_now()):
             latest_evaluation_by_outcome[item.outcome_id] = item
 
-    ensure_redis_job_evaluation_worker_for_pending(job_id)
-    job_queue_size = get_job_evaluation_queue_size(job_id)
-
     outcome_statuses = []
     outcomes_ready = 0
     for outcome in outcomes:
@@ -812,8 +869,7 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
             "report_missing_candidate_count": missing_candidate_count,
         })
 
-    return {
-        "job_id": job_id,
+    progress_core = {
         "submissions_total": len(submissions),
         "candidates_total": len(candidates),
         "outcomes_total": len(outcomes),
@@ -823,6 +879,19 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
         "candidate_status_counts": dict(sorted(candidate_counts.items())),
         "active_count": sum(candidate_counts.get(status, 0) for status in ACTIVE_STATUSES),
         "evaluated_count": len(evaluated),
+    }
+
+    queue_cleanup_count = 0
+    if progress_indicates_complete(progress_core):
+        queue_cleanup_count = clear_job_evaluation_queue(job_id, reason="job_complete")
+    else:
+        ensure_redis_job_evaluation_worker_for_pending(job_id)
+
+    job_queue_size = get_job_evaluation_queue_size(job_id)
+
+    return {
+        "job_id": job_id,
+        **progress_core,
         "top_candidates": [
             {
                 "candidate_id": c.candidate_id,
@@ -845,4 +914,5 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
         "queue_active": job_queue_size > 0,
         "global_queue_size": get_job_evaluation_queue_size(),
         "queue_backend": get_job_evaluation_queue_backend(),
+        "queue_cleanup_count": queue_cleanup_count,
     }
