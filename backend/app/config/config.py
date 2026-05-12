@@ -11,6 +11,8 @@ class Config:
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    LLM_INPUT_COST_PER_1M = float(os.getenv("LLM_INPUT_COST_PER_1M", "0") or 0)
+    LLM_OUTPUT_COST_PER_1M = float(os.getenv("LLM_OUTPUT_COST_PER_1M", "0") or 0)
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:3000")
     ENABLE_LLM_SUMMARIZATION = os.getenv("ENABLE_LLM_SUMMARIZATION", "true").lower() in ("true", "1", "yes")
 

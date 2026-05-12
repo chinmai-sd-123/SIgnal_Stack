@@ -10,6 +10,7 @@ Provides observability through:
 from typing import Dict, Any
 import time
 import json
+import re
 from functools import wraps
 
 from app.utils.time_utils import utc_now
@@ -23,6 +24,12 @@ _metrics = {
         "snapshot_fetch_errors": 0,
         "llm_calls_total": 0,
         "llm_failures_total": 0,
+        "llm_input_tokens_total": 0,
+        "llm_output_tokens_total": 0,
+        "llm_estimated_cost_total": 0.0,
+        "llm_cache_hits_total": 0,
+        "llm_cache_misses_total": 0,
+        "llm_usage_missing_total": 0,
         "feedback_events_total": 0,
     },
     "histograms": {
@@ -31,7 +38,11 @@ _metrics = {
     },
     "gauges": {
         "active_evaluations": 0,
-    }
+    },
+    "labeled_gauges": {
+        "cost_per_candidate": {},
+        "cost_per_job": {},
+    },
 }
 
 _start_time = utc_now()
@@ -39,13 +50,24 @@ _start_time = utc_now()
 
 def increment_counter(name: str, value: int = 1):
     """Increment a counter metric."""
-    if name in _metrics["counters"]:
-        _metrics["counters"][name] += value
+    _metrics["counters"][name] = _metrics["counters"].get(name, 0) + value
 
 
 def set_gauge(name: str, value: float):
     """Set a gauge metric."""
     _metrics["gauges"][name] = value
+
+
+def _safe_label(value: Any) -> str:
+    text = str(value or "unknown")
+    return re.sub(r"[^a-zA-Z0-9_.@:/-]", "_", text)[:160]
+
+
+def increment_labeled_gauge(name: str, label_value: Any, value: float):
+    """Increment a labeled gauge stored for JSON and Prometheus export."""
+    labels = _metrics.setdefault("labeled_gauges", {}).setdefault(name, {})
+    safe_value = _safe_label(label_value)
+    labels[safe_value] = labels.get(safe_value, 0.0) + float(value or 0.0)
 
 
 def record_histogram(name: str, value: float):
@@ -90,6 +112,10 @@ def get_all_metrics() -> Dict[str, Any]:
         "uptime_seconds": uptime,
         "counters": dict(_metrics["counters"]),
         "gauges": dict(_metrics["gauges"]),
+        "labeled_gauges": {
+            name: dict(values)
+            for name, values in _metrics.get("labeled_gauges", {}).items()
+        },
         "histograms": {}
     }
     
@@ -112,6 +138,13 @@ def get_prometheus_format() -> str:
     for name, value in _metrics["gauges"].items():
         lines.append(f"# TYPE signalstack_{name} gauge")
         lines.append(f"signalstack_{name} {value}")
+
+    # Labeled gauges
+    for name, values in _metrics.get("labeled_gauges", {}).items():
+        label_name = "candidate_id" if name.endswith("candidate") else "job_id"
+        lines.append(f"# TYPE signalstack_{name} gauge")
+        for label_value, value in values.items():
+            lines.append(f'signalstack_{name}{{{label_name}="{label_value}"}} {value}')
     
     # Histograms
     for name in _metrics["histograms"]:
@@ -175,6 +208,61 @@ def track_llm_call(latency_seconds: float, success: bool = True):
     record_histogram("llm_latency_seconds", latency_seconds)
     if not success:
         increment_counter("llm_failures_total")
+
+
+def track_llm_cache_hit(model: str = None, context: Dict[str, Any] = None):
+    """Track an LLM cache hit. Cache hits do not increment provider calls."""
+    increment_counter("llm_cache_hits_total")
+    log_metric_event("llm_cache_hit", {
+        "model": model,
+        **(context or {}),
+    })
+
+
+def track_llm_usage(
+    latency_seconds: float,
+    success: bool,
+    model: str,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    estimated_cost: float = 0.0,
+    cached: bool = False,
+    context: Dict[str, Any] = None,
+):
+    """Track provider LLM usage and derived cost metrics."""
+    context = context or {}
+
+    if cached:
+        track_llm_cache_hit(model=model, context=context)
+        return
+
+    increment_counter("llm_cache_misses_total")
+    track_llm_call(latency_seconds, success=success)
+
+    if input_tokens or output_tokens:
+        increment_counter("llm_input_tokens_total", int(input_tokens or 0))
+        increment_counter("llm_output_tokens_total", int(output_tokens or 0))
+    else:
+        increment_counter("llm_usage_missing_total")
+
+    estimated_cost = float(estimated_cost or 0.0)
+    if estimated_cost:
+        increment_counter("llm_estimated_cost_total", estimated_cost)
+        if context.get("candidate_id"):
+            increment_labeled_gauge("cost_per_candidate", context["candidate_id"], estimated_cost)
+        if context.get("job_id"):
+            increment_labeled_gauge("cost_per_job", context["job_id"], estimated_cost)
+
+    log_metric_event("llm_usage", {
+        "model": model,
+        "latency_seconds": round(float(latency_seconds or 0.0), 4),
+        "success": success,
+        "cached": False,
+        "input_tokens": int(input_tokens or 0),
+        "output_tokens": int(output_tokens or 0),
+        "estimated_cost": round(estimated_cost, 8),
+        **context,
+    })
 
 
 def track_snapshot_fetch(success: bool = True):

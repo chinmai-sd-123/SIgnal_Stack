@@ -243,7 +243,14 @@ class Evaluator:
                 interpretation = llm.interpret_signals(
                     task_context,
                     evidence_dicts,
-                    payload=proof.payload
+                    payload=proof.payload,
+                    tracking_context={
+                        "candidate_id": cand_id,
+                        "job_id": getattr(outcome, "job_id", None),
+                        "outcome_id": getattr(outcome, "id", None),
+                        "task_id": getattr(task, "id", None),
+                        "operation": "signal_interpretation",
+                    },
                 )
                 
                 signal_strength = interpretation.get("strength", 0.0)
