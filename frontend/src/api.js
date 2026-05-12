@@ -292,11 +292,11 @@ export async function getAuditLogs() {
     return response.json();
 }
 
-export async function getGithubRepos(username, jobId) {
+export async function getGithubRepos(username, jobId, maxRepos = 50) {
     const response = await fetch(`${API_URL}/plugin/github/repos/select`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ github_username: username, job_id: jobId })
+        body: JSON.stringify({ github_username: username, job_id: jobId, max_repos: maxRepos })
     });
     if (response.ok) {
         const data = await response.json();
@@ -309,7 +309,7 @@ export async function getGithubRepos(username, jobId) {
     }
 
     // Fallback to GitHub public API for basic repo listing.
-    const ghResponse = await fetch(`https://api.github.com/users/${encodeURIComponent(username)}/repos?per_page=30&sort=updated`);
+    const ghResponse = await fetch(`https://api.github.com/users/${encodeURIComponent(username)}/repos?per_page=${Math.min(maxRepos, 100)}&sort=updated`);
     if (!ghResponse.ok) {
         throw new Error('Failed to fetch repos');
     }

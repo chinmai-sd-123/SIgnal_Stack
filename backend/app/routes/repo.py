@@ -15,6 +15,7 @@ class RepoSelectionRequest(BaseModel):
     github_username: str
     job_id: Optional[str] = None
     candidate_id: Optional[str] = None
+    max_repos: int = 50
 
     @field_validator("github_username")
     @classmethod
@@ -94,14 +95,15 @@ def select_repos(request: RepoSelectionRequest, db: Session = Depends(get_db)):
                 "required_languages": job_obj.required_languages or []
             }
             
-    scored_repos = selector.select_repos_for_candidate(candidate, job_dict)
+    max_repos = max(5, min(request.max_repos or 50, 100))
+    scored_repos = selector.select_repos_for_candidate(candidate, job_dict, max_repos=max_repos)
     logger.info("[repo-select] found=%s", len(scored_repos))
 
     if scored_repos:
         return jsonable_encoder(scored_repos)
 
     # Fallback: return basic repo list if scoring yields nothing
-    user_repos = selector._get_user_repos(request.github_username)
+    user_repos = selector._get_user_repos(request.github_username, limit=max_repos)
     logger.info("[repo-select] fallback_user_repos=%s", len(user_repos))
     fallback: List[RepoScore] = []
     for repo in user_repos[:5]:

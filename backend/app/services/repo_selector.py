@@ -615,7 +615,7 @@ class RepoSelector:
         # 2. If candidate has GitHub username, fetch their repos
         username = candidate.get("github_username")
         if username:
-            user_repos = self._get_user_repos(username)
+            user_repos = self._get_user_repos(username, limit=max_repos)
             repos_to_score.extend(user_repos)
 
         # 3. Build keyword list from job and candidate info

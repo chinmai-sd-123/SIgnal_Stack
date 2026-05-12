@@ -22,6 +22,7 @@ export default function ProofSubmit() {
     const [repos, setRepos] = useState([]);
     const [fetchingRepos, setFetchingRepos] = useState(false);
     const [showRepoList, setShowRepoList] = useState(false);
+    const [repoSearch, setRepoSearch] = useState('');
 
     const handleFetchRepos = async () => {
         const username = formData.github_username.trim();
@@ -31,6 +32,7 @@ export default function ProofSubmit() {
         }
         setFetchingRepos(true);
         setShowRepoList(true);
+        setRepoSearch('');
         try {
             const data = await getGithubRepos(username, outcomeId);
             setRepos(data);
@@ -57,6 +59,48 @@ export default function ProofSubmit() {
     ) : false;
 
     const isArtifactType = !isSweRole; // Use this for cleaner logic
+
+    const filteredRepos = repos.filter((repo) => {
+        const query = repoSearch.trim().toLowerCase();
+        if (!query) return true;
+        return [repo.repo, repo.owner, repo.language, repo.url]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(query));
+    });
+    const topRepos = filteredRepos.slice(0, 5);
+    const otherRepos = filteredRepos.slice(5);
+    const renderRepoItem = (repo) => (
+        <li
+            key={repo.url}
+            onClick={() => selectRepo(repo)}
+            className="p-3 hover:bg-primary-soft cursor-pointer transition-colors"
+        >
+            <div className="flex justify-between items-start gap-3">
+                <div className="font-medium text-gray-900 flex items-center gap-2 min-w-0">
+                    <span className="truncate">{repo.repo}</span>
+                    <span className="text-xs font-normal text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200 flex-shrink-0">
+                        Score: {(repo.score * 10).toFixed(1)}
+                    </span>
+                </div>
+                {repo.language && (
+                    <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full flex-shrink-0">
+                        {repo.language}
+                    </span>
+                )}
+            </div>
+            <div className="flex gap-4 mt-1 text-xs text-gray-500">
+                <span className="flex items-center gap-1">
+                    <Star className="w-3 h-3" /> Match
+                </span>
+                {repo.last_commit_date && (
+                    <span className="flex items-center gap-1">
+                        <GitBranch className="w-3 h-3" />
+                        {new Date(repo.last_commit_date).toLocaleDateString()}
+                    </span>
+                )}
+            </div>
+        </li>
+    );
 
     // Mock Live Preview State
     const [preview, setPreview] = useState(null);
@@ -248,49 +292,41 @@ export default function ProofSubmit() {
                                 {/* Repo Selection List */}
                                 {showRepoList && (
                                     <div className="bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto animate-fade-in custom-scrollbar">
-                                        <div className="p-2 border-b border-gray-100 bg-gray-50 flex justify-between items-center sticky top-0">
-                                            <span className="text-xs font-bold text-gray-500 uppercase">Select a Repository</span>
-                                            <button onClick={() => setShowRepoList(false)} className="text-xs text-primary hover:underline">Close</button>
+                                        <div className="p-2 border-b border-gray-100 bg-gray-50 sticky top-0 z-10 space-y-2">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-xs font-bold text-gray-500 uppercase">Select a Repository</span>
+                                                <button onClick={() => setShowRepoList(false)} className="text-xs text-primary hover:underline">Close</button>
+                                            </div>
+                                            <div className="relative">
+                                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                                <input
+                                                    type="search"
+                                                    value={repoSearch}
+                                                    onChange={(e) => setRepoSearch(e.target.value)}
+                                                    placeholder="Search repositories"
+                                                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-200 bg-white text-xs outline-none focus:border-primary"
+                                                />
+                                            </div>
                                         </div>
                                         {repos.length === 0 ? (
                                             <div className="p-4 text-center text-sm text-gray-500">
                                                 {fetchingRepos ? "Analyzing repositories..." : "No relevant repositories found."}
                                             </div>
+                                        ) : filteredRepos.length === 0 ? (
+                                            <div className="p-4 text-center text-sm text-gray-500">
+                                                No repositories match.
+                                            </div>
                                         ) : (
-                                            <ul className="divide-y divide-gray-100">
-                                                {repos.map((repo) => (
-                                                    <li
-                                                        key={repo.url}
-                                                        onClick={() => selectRepo(repo)}
-                                                        className="p-3 hover:bg-primary-soft cursor-pointer transition-colors"
-                                                    >
-                                                        <div className="flex justify-between items-start">
-                                                            <div className="font-medium text-gray-900 flex items-center gap-2">
-                                                                {repo.repo}
-                                                                <span className="text-xs font-normal text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
-                                                                    Score: {(repo.score * 10).toFixed(1)}
-                                                                </span>
-                                                            </div>
-                                                            {repo.language && (
-                                                                <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full">
-                                                                    {repo.language}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        <div className="flex gap-4 mt-1 text-xs text-gray-500">
-                                                            <span className="flex items-center gap-1">
-                                                                <Star className="w-3 h-3" /> Match
-                                                            </span>
-                                                            {repo.last_commit_date && (
-                                                                <span className="flex items-center gap-1">
-                                                                    <GitBranch className="w-3 h-3" />
-                                                                    {new Date(repo.last_commit_date).toLocaleDateString()}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </li>
-                                                ))}
-                                            </ul>
+                                            <>
+                                                <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-primary bg-primary-soft">Top Matches</div>
+                                                <ul className="divide-y divide-gray-100">{topRepos.map(renderRepoItem)}</ul>
+                                                {otherRepos.length > 0 && (
+                                                    <>
+                                                        <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-gray-500 bg-gray-50">All Repositories</div>
+                                                        <ul className="divide-y divide-gray-100">{otherRepos.map(renderRepoItem)}</ul>
+                                                    </>
+                                                )}
+                                            </>
                                         )}
                                     </div>
                                 )}
