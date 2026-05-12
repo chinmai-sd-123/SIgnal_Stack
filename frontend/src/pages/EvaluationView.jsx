@@ -22,6 +22,15 @@ import FeedbackModal from '../components/FeedbackModal';
 
 const CANDIDATE_COLORS = ['#0b5f66', '#0f766e', '#2d8c8f', '#6aa9a6', '#c9a227', '#f2e4b5'];
 
+const formatSignalLabel = (index) => `S${index + 1}`;
+
+const compactSignalTitle = (title = '', maxLength = 72) => {
+    const cleanTitle = String(title || '').replace(/\s+/g, ' ').trim();
+    if (!cleanTitle) return 'Untitled signal';
+    if (cleanTitle.length <= maxLength) return cleanTitle;
+    return `${cleanTitle.slice(0, maxLength - 1).trim()}...`;
+};
+
 export default function EvaluationView() {
     const { jobId } = useParams();
     const location = useLocation();
@@ -207,8 +216,11 @@ export default function EvaluationView() {
     const comparisonData = useMemo(() => {
         const allocations = evaluation?.work_allocation || [];
 
-        return allocations.map(alloc => {
-            const row = { task: alloc.task_title };
+        return allocations.map((alloc, index) => {
+            const row = {
+                task: formatSignalLabel(index),
+                task_title: alloc.task_title || `Signal ${index + 1}`,
+            };
 
             comparisonCandidates.forEach(candidateId => {
                 const candidateScore = alloc.top_candidates?.find(tc => tc.candidate_id === candidateId);
@@ -538,7 +550,7 @@ export default function EvaluationView() {
                 </div>
 
                 {/* Candidate Comparison Panel */}
-                <div id="comparison" className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-8 scroll-mt-24">
+                <div id="comparison" className="bg-[rgba(255,253,248,0.95)] rounded-2xl border border-gray-200 shadow-card p-5 sm:p-6 mb-8 scroll-mt-24">
                     <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                         <TrendingUp className="w-5 h-5 text-primary" />
                         Candidate Comparison
@@ -552,16 +564,46 @@ export default function EvaluationView() {
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                            <div>
-                                <h4 className="text-sm font-semibold text-gray-700 mb-3">Candidate Skill Overview</h4>
-                                <div className="h-80 w-full">
+                            <div className="rounded-2xl border border-light-200 bg-white/70 p-4 shadow-sm">
+                                <div className="mb-3 flex items-center justify-between gap-3">
+                                    <h4 className="text-sm font-bold text-gray-900">Candidate Skill Overview</h4>
+                                    <span className="rounded-full border border-primary/15 bg-primary-soft px-2.5 py-1 text-[11px] font-bold text-primary">
+                                        Top {comparisonCandidates.length}
+                                    </span>
+                                </div>
+                                <div className="h-80 w-full overflow-hidden rounded-xl bg-white/60">
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <RadarChart cx="50%" cy="50%" outerRadius="80%" data={comparisonData}>
-                                            <PolarGrid stroke="#e5e7eb" />
-                                            <PolarAngleAxis dataKey="task" tick={{ fill: '#4b5563', fontSize: 12 }} />
-                                            <PolarRadiusAxis angle={30} domain={[0, 1]} tick={{ fill: '#9ca3af' }} />
-                                            <Tooltip formatter={(value) => `${Math.round(value * 100)}%`} />
-                                            <Legend />
+                                        <RadarChart
+                                            cx="50%"
+                                            cy="48%"
+                                            outerRadius="62%"
+                                            data={comparisonData}
+                                            margin={{ top: 18, right: 28, bottom: 18, left: 28 }}
+                                        >
+                                            <PolarGrid stroke="#e6e1d7" />
+                                            <PolarAngleAxis
+                                                dataKey="task"
+                                                tick={{ fill: '#475569', fontSize: 12, fontWeight: 700 }}
+                                            />
+                                            <PolarRadiusAxis
+                                                angle={30}
+                                                domain={[0, 1]}
+                                                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                                                tickFormatter={(value) => `${Math.round(value * 100)}%`}
+                                            />
+                                            <Tooltip
+                                                formatter={(value) => `${Math.round(value * 100)}%`}
+                                                labelFormatter={(label, payload) => {
+                                                    const title = payload?.[0]?.payload?.task_title;
+                                                    return `${label}: ${title || 'Signal'}`;
+                                                }}
+                                                contentStyle={{
+                                                    borderRadius: '0.75rem',
+                                                    border: '1px solid #e6e1d7',
+                                                    boxShadow: '0 10px 30px rgba(15, 23, 42, 0.12)',
+                                                }}
+                                            />
+                                            <Legend wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
                                             {comparisonCandidates.map((candidate, index) => (
                                                 <Radar
                                                     key={candidate}
@@ -575,17 +617,27 @@ export default function EvaluationView() {
                                         </RadarChart>
                                     </ResponsiveContainer>
                                 </div>
+                                <div className="mt-4 grid grid-cols-1 gap-2">
+                                    {comparisonData.map((row) => (
+                                        <div key={row.task} className="flex gap-2 rounded-lg border border-light-200 bg-white/70 px-3 py-2 text-xs">
+                                            <span className="shrink-0 font-bold text-primary">{row.task}</span>
+                                            <span className="min-w-0 text-text-secondary" title={row.task_title}>
+                                                {compactSignalTitle(row.task_title)}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
 
-                            <div>
-                                <h4 className="text-sm font-semibold text-gray-700 mb-3">Task Confidence Breakdown</h4>
+                            <div className="rounded-2xl border border-light-200 bg-white/70 p-4 shadow-sm">
+                                <h4 className="text-sm font-bold text-gray-900 mb-3">Task Confidence Breakdown</h4>
                                 <div className="h-80 w-full">
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={comparisonData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                        <BarChart data={comparisonData} margin={{ top: 20, right: 24, left: 0, bottom: 8 }}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6e1d7" />
                                             <XAxis
                                                 dataKey="task"
-                                                tick={{ fill: '#4b5563', fontSize: 12 }}
+                                                tick={{ fill: '#475569', fontSize: 12, fontWeight: 700 }}
                                                 axisLine={false}
                                                 tickLine={false}
                                             />
@@ -598,9 +650,17 @@ export default function EvaluationView() {
                                             />
                                             <Tooltip
                                                 formatter={(value) => `${Math.round(value * 100)}%`}
-                                                contentStyle={{ borderRadius: '0.5rem', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                                labelFormatter={(label, payload) => {
+                                                    const title = payload?.[0]?.payload?.task_title;
+                                                    return `${label}: ${title || 'Signal'}`;
+                                                }}
+                                                contentStyle={{
+                                                    borderRadius: '0.75rem',
+                                                    border: '1px solid #e6e1d7',
+                                                    boxShadow: '0 10px 30px rgba(15, 23, 42, 0.12)',
+                                                }}
                                             />
-                                            <Legend />
+                                            <Legend wrapperStyle={{ fontSize: 12 }} />
                                             {comparisonCandidates.map((candidate, index) => (
                                                 <Bar
                                                     key={candidate}
