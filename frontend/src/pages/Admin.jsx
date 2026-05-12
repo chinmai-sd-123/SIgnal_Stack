@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Settings, History, FileText, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, Activity } from 'lucide-react';
-import { apiFetch } from '../api';
+import { Settings, History, FileText, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, Activity, UserPlus, Copy } from 'lucide-react';
+import { apiFetch, createRecruiterInvite, getRecruiterInvites } from '../api';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -24,6 +24,9 @@ export default function Admin() {
     const [auditLogs, setAuditLogs] = useState([]);
     const [llmLogs, setLlmLogs] = useState([]);
     const [llmMetrics, setLlmMetrics] = useState(null);
+    const [recruiterInvites, setRecruiterInvites] = useState([]);
+    const [inviteForm, setInviteForm] = useState({ email: '', name: '' });
+    const [inviteMessage, setInviteMessage] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [expandedLog, setExpandedLog] = useState(null);
@@ -51,6 +54,9 @@ export default function Admin() {
                 ]);
                 setLlmLogs(Array.isArray(logData) ? logData : []);
                 setLlmMetrics(metricsData || null);
+            } else if (activeTab === 'invites') {
+                const data = await getRecruiterInvites();
+                setRecruiterInvites(Array.isArray(data) ? data : []);
             }
         } catch (error) {
             console.error('Error fetching data:', error);
@@ -68,6 +74,7 @@ export default function Admin() {
         { id: 'tasks', label: 'Task Learning', icon: Activity },
         { id: 'audit', label: 'Audit Logs', icon: History },
         { id: 'llm', label: 'LLM Logs', icon: FileText },
+        { id: 'invites', label: 'Recruiter Invites', icon: UserPlus },
     ];
 
     const formatCount = (value) => Number(value || 0).toLocaleString();
@@ -77,6 +84,31 @@ export default function Admin() {
     const llmLatency = llmMetrics?.histograms?.llm_latency_seconds || {};
     const llmCostByCandidate = llmMetrics?.labeled_gauges?.cost_per_candidate || {};
     const llmCostByJob = llmMetrics?.labeled_gauges?.cost_per_job || {};
+    const buildSignupLink = (token) => `${window.location.origin}/signup?token=${encodeURIComponent(token)}`;
+
+    const handleCreateInvite = async (event) => {
+        event.preventDefault();
+        setInviteMessage('');
+        setError('');
+        try {
+            const invite = await createRecruiterInvite(inviteForm);
+            setInviteForm({ email: '', name: '' });
+            setRecruiterInvites((current) => [invite, ...current]);
+            setInviteMessage(`Invite created for ${invite.email}`);
+        } catch (err) {
+            setError(err.message || 'Failed to create invite');
+        }
+    };
+
+    const copyInvite = async (token) => {
+        const link = buildSignupLink(token);
+        try {
+            await navigator.clipboard.writeText(link);
+            setInviteMessage('Signup link copied');
+        } catch (err) {
+            setInviteMessage(link);
+        }
+    };
 
     return (
         <div className="max-w-7xl mx-auto space-y-6">
@@ -364,6 +396,74 @@ export default function Admin() {
                                                         </pre>
                                                     </div>
                                                 )}
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Recruiter Invites Tab */}
+                        {activeTab === 'invites' && (
+                            <div className="space-y-6">
+                                <div>
+                                    <h2 className="heading-2">Recruiter Invites</h2>
+                                    <p className="text-sm text-gray-500 mt-1">
+                                        Create invite-only recruiter accounts. Each link is tied to one email and expires in 14 days.
+                                    </p>
+                                </div>
+
+                                <form onSubmit={handleCreateInvite} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
+                                        <input
+                                            type="email"
+                                            required
+                                            value={inviteForm.email}
+                                            onChange={(event) => setInviteForm({ ...inviteForm, email: event.target.value })}
+                                            placeholder="recruiter@company.com"
+                                            className="input"
+                                        />
+                                        <input
+                                            type="text"
+                                            value={inviteForm.name}
+                                            onChange={(event) => setInviteForm({ ...inviteForm, name: event.target.value })}
+                                            placeholder="Name"
+                                            className="input"
+                                        />
+                                        <button type="submit" className="btn btn-primary">
+                                            <UserPlus className="w-4 h-4 mr-2" />
+                                            Create Invite
+                                        </button>
+                                    </div>
+                                    {inviteMessage && <div className="mt-3 text-sm text-primary">{inviteMessage}</div>}
+                                </form>
+
+                                <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                                    {recruiterInvites.length === 0 ? (
+                                        <p className="text-gray-400 text-center py-8">No recruiter invites yet</p>
+                                    ) : (
+                                        recruiterInvites.map((invite) => (
+                                            <div key={invite.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                                                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="font-semibold text-gray-900 truncate">{invite.email}</div>
+                                                        <div className="text-xs text-gray-500 mt-1">
+                                                            {invite.name || 'No name'} - {invite.status} - expires {invite.expires_at?.split('T')[0] || 'N/A'}
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => copyInvite(invite.token)}
+                                                        disabled={invite.status !== 'active'}
+                                                        className="btn btn-secondary disabled:opacity-50"
+                                                    >
+                                                        <Copy className="w-4 h-4 mr-2" />
+                                                        Copy Signup Link
+                                                    </button>
+                                                </div>
+                                                <div className="mt-3 rounded bg-gray-50 px-3 py-2 text-xs text-gray-500 break-all">
+                                                    {buildSignupLink(invite.token)}
+                                                </div>
                                             </div>
                                         ))
                                     )}

@@ -18,7 +18,7 @@ export default function Layout({ children }) {
     const location = useLocation();
 
     // Hide recruiter chrome on candidate-facing pages
-    const isPublicRoute = location.pathname.startsWith('/apply') || location.pathname.startsWith('/login');
+    const isPublicRoute = location.pathname.startsWith('/apply') || location.pathname.startsWith('/login') || location.pathname.startsWith('/signup');
     const recruiterName = localStorage.getItem('recruiterName') || 'Recruiter';
     const recruiterRole = localStorage.getItem('recruiterRole') || 'recruiter';
 

@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { recruiterLogin } from '../api';
 
 const RecruiterLogin = () => {
@@ -21,7 +21,7 @@ const RecruiterLogin = () => {
             localStorage.setItem('recruiterRole', data.recruiter.role || 'recruiter');
             navigate('/');
         } catch (err) {
-            setError('Login failed. Please check your credentials.');
+            setError(err.message || 'Login failed. Please check your credentials.');
         }
     };
 
@@ -33,7 +33,7 @@ const RecruiterLogin = () => {
                         Recruiter Login
                     </h2>
                     <p className="mt-2 text-center text-sm text-gray-500">
-                        Sign in with your recruiter email. New emails create a private workspace.
+                        Sign in with your recruiter email. New recruiter accounts require an admin invite.
                     </p>
                 </div>
                 <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
@@ -78,6 +78,9 @@ const RecruiterLogin = () => {
                         </button>
                     </div>
                 </form>
+                <p className="text-center text-sm text-gray-500">
+                    Have an invite? <Link to="/signup" className="font-medium text-primary hover:underline">Create your account</Link>
+                </p>
             </div>
         </div>
     );

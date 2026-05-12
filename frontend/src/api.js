@@ -20,7 +20,11 @@ export async function apiFetch(path, options = {}) {
         localStorage.removeItem('recruiterId');
         localStorage.removeItem('recruiterName');
         localStorage.removeItem('recruiterRole');
-        if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/apply')) {
+        if (
+            !window.location.pathname.startsWith('/login') &&
+            !window.location.pathname.startsWith('/signup') &&
+            !window.location.pathname.startsWith('/apply')
+        ) {
             window.location.href = '/login';
         }
     }
@@ -37,6 +41,50 @@ export async function recruiterLogin(payload) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail || "Invalid credentials");
     }
+    return response.json();
+}
+
+export async function recruiterSignup(payload) {
+    const response = await apiFetch(`/recruiter/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to create account");
+    }
+    return response.json();
+}
+
+export async function getRecruiterInvite(token) {
+    const response = await apiFetch(`/recruiter/invites/${encodeURIComponent(token)}`);
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Invite not found");
+    }
+    return response.json();
+}
+
+export async function createRecruiterInvite(payload) {
+    const response = await apiFetch(`/recruiter/invites`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to create invite");
+    }
+    return response.json();
+}
+
+export async function getRecruiterInvites() {
+    const response = await apiFetch(`/recruiter/invites`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+    });
+    if (!response.ok) throw new Error("Failed to fetch recruiter invites");
     return response.json();
 }
 

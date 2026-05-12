@@ -18,6 +18,7 @@ import AdminAudit from './pages/AdminAudit';
 import Admin from './pages/Admin';
 import CandidateApply from './pages/CandidateApply';
 import RecruiterLogin from './pages/RecruiterLogin';
+import RecruiterSignup from './pages/RecruiterSignup';
 
 import Layout from './components/Layout';
 
@@ -41,6 +42,7 @@ function App() {
       <Layout>
         <Routes>
           <Route path="/login" element={<RecruiterLogin />} />
+          <Route path="/signup" element={<RecruiterSignup />} />
 
           {/* Job-Centric Routes */}
           <Route path="/" element={<ProtectedRoute><JobDashboard /></ProtectedRoute>} />
