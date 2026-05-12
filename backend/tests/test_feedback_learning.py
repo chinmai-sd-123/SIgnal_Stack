@@ -167,3 +167,120 @@ def test_task_feedback_boost_at_max_does_not_reduce_weight(client):
     data = task_feedback_resp.json()
     assert data["new_weights"]["Already Max"] == 1.0
     assert "maximum" in " ".join(data["changes"])
+
+
+@pytest.mark.integration
+def test_task_feedback_updates_linked_master_template_and_future_instances(client):
+    source_job_resp = client.post("/jobs", json={
+        "title": "AI Engineer Intern",
+        "description": "Build AI products",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Software Engineering",
+        "job_type": "Internship",
+    })
+    assert source_job_resp.status_code == 200
+    source_job_id = source_job_resp.json()["id"]
+
+    outcome_resp = client.post(
+        "/outcomes",
+        json={
+            "job_id": source_job_id,
+            "title": "Ship AI Backend Services",
+            "description": "Turn AI prototypes into reliable backend APIs",
+            "company": "SignalStack",
+            "location": "Remote",
+            "category": "Software Engineering",
+            "job_type": "Internship",
+            "save_as_template": True,
+            "tasks": [
+                {"name": "Expose AI workflow through API", "priority": "High", "weight": 0.7},
+                {"name": "Add production error handling", "priority": "Medium", "weight": 0.3},
+            ],
+        },
+    )
+    assert outcome_resp.status_code == 200
+    instance = outcome_resp.json()
+    master_template_id = instance["source_template_id"]
+
+    task_feedback_resp = client.post(
+        "/feedback/task-weight",
+        json={
+            "job_id": source_job_id,
+            "task_name": "Expose AI workflow through API",
+            "direction": "boost",
+            "reason": "This task predicts successful candidates",
+        },
+    )
+    assert task_feedback_resp.status_code == 200
+    task_feedback = task_feedback_resp.json()
+    assert any("[Master Template]" in change for change in task_feedback["changes"])
+    assert task_feedback["new_weights"]["Expose AI workflow through API"] == 0.85
+
+    template_resp = client.get(f"/outcomes/{master_template_id}")
+    assert template_resp.status_code == 200
+    template = template_resp.json()
+    assert template["job_id"] is None
+    template_weights = {task["name"]: task["weight"] for task in template["tasks"]}
+    assert template_weights["Expose AI workflow through API"] == pytest.approx(0.85)
+    assert template_weights["Add production error handling"] == pytest.approx(0.15)
+
+    future_job_resp = client.post("/jobs", json={
+        "title": "Applied AI Engineer Intern",
+        "description": "Build applied AI services",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Software Engineering",
+        "job_type": "Internship",
+    })
+    assert future_job_resp.status_code == 200
+    future_job_id = future_job_resp.json()["id"]
+
+    instantiate_resp = client.post(f"/jobs/{future_job_id}/instantiate?template_id={master_template_id}")
+    assert instantiate_resp.status_code == 200
+    future_instance = instantiate_resp.json()
+    future_weights = {task["name"]: task["weight"] for task in future_instance["tasks"]}
+    assert future_weights["Expose AI workflow through API"] == pytest.approx(0.85)
+    assert future_weights["Add production error handling"] == pytest.approx(0.15)
+
+
+@pytest.mark.integration
+def test_task_feedback_with_job_id_selects_outcome_that_owns_task(client):
+    job_resp = client.post("/jobs", json={
+        "title": "AI Engineer Intern",
+        "description": "Build AI systems",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Software Engineering",
+        "job_type": "Internship",
+    })
+    assert job_resp.status_code == 200
+    job_id = job_resp.json()["id"]
+
+    first_outcome_resp = client.post("/outcomes", json={
+        "job_id": job_id,
+        "title": "Build APIs",
+        "description": "Backend APIs",
+        "tasks": [{"name": "Implement API", "priority": "High", "weight": 1.0}],
+    })
+    second_outcome_resp = client.post("/outcomes", json={
+        "job_id": job_id,
+        "title": "Build RAG",
+        "description": "Search over docs",
+        "tasks": [{"name": "Implement retrieval pipeline", "priority": "High", "weight": 1.0}],
+    })
+    assert first_outcome_resp.status_code == 200
+    assert second_outcome_resp.status_code == 200
+
+    task_feedback_resp = client.post(
+        "/feedback/task-weight",
+        json={
+            "job_id": job_id,
+            "task_name": "Implement retrieval pipeline",
+            "direction": "penalize",
+            "reason": "Retrieval evidence was weak",
+        },
+    )
+    assert task_feedback_resp.status_code == 200
+    data = task_feedback_resp.json()
+    assert data["new_weights"]["Implement retrieval pipeline"] == 0.85
