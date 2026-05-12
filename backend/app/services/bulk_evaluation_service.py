@@ -317,6 +317,35 @@ def _submission_payload_summary(submission: InviteSubmission) -> Dict[str, Any]:
     }
 
 
+def _evaluated_candidate_rows(db, job_id: str, deep_limit: int) -> List[JobCandidate]:
+    query = db.query(JobCandidate).filter(
+        JobCandidate.job_id == job_id,
+        JobCandidate.evaluation_score.isnot(None),
+    ).order_by(JobCandidate.evaluation_score.desc())
+
+    if deep_limit > 0:
+        query = query.limit(deep_limit)
+
+    return query.all()
+
+
+def _signals_from_candidate(candidate: JobCandidate) -> Dict[str, Any]:
+    data = candidate.evaluation_data or {}
+    return data.get("signals") or {}
+
+
+def _candidate_ids_for_deep_evaluation(
+    db,
+    job_id: str,
+    deep_limit: int,
+    signals_by_candidate: Dict[str, Dict[str, Any]],
+) -> List[str]:
+    evaluated_candidates = _evaluated_candidate_rows(db, job_id, max(0, deep_limit))
+    for candidate in evaluated_candidates:
+        signals_by_candidate.setdefault(candidate.candidate_id, _signals_from_candidate(candidate))
+    return [candidate.candidate_id for candidate in evaluated_candidates]
+
+
 def _mark_failure(db, candidate: JobCandidate, submission: Optional[InviteSubmission], error: str):
     candidate.status = "failed"
     candidate.evaluation_data = {
@@ -535,8 +564,12 @@ def evaluate_job_applications_sync(
                 screened.append({"candidate_id": candidate_id, "status": "failed", "score": 0.0})
 
         successful = [row for row in screened if row.get("status") == "evaluated"]
-        successful.sort(key=lambda row: row.get("score", 0.0), reverse=True)
-        top_candidate_ids = [row["candidate_id"] for row in successful[:max(0, deep_limit)]]
+        top_candidate_ids = _candidate_ids_for_deep_evaluation(
+            db,
+            job_id,
+            deep_limit,
+            signals_by_candidate,
+        )
 
         evaluations_created = 0
         if include_deep_evaluation and top_candidate_ids and deep_limit > 0:

@@ -160,7 +160,7 @@ Current metric families:
 | `signalstack_llm_failures_total` | Counter | Failed LLM calls. |
 | `signalstack_llm_input_tokens_total` | Counter | Provider-reported input tokens. |
 | `signalstack_llm_output_tokens_total` | Counter | Provider-reported output tokens. |
-| `signalstack_llm_estimated_cost_total` | Counter | Estimated LLM spend using configured token prices. |
+| `signalstack_llm_estimated_cost_total` | Counter | Estimated LLM spend using configured or model-inferred token prices. |
 | `signalstack_llm_cache_hits_total` | Counter | LLM prompt/schema cache hits. |
 | `signalstack_llm_cache_misses_total` | Counter | LLM prompt/schema cache misses. |
 | `signalstack_llm_usage_missing_total` | Counter | LLM calls where provider usage data was not returned. |
@@ -436,8 +436,8 @@ Create `backend/.env`:
 GITHUB_TOKEN=your_github_token
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-5-mini
-LLM_INPUT_COST_PER_1M=0
-LLM_OUTPUT_COST_PER_1M=0
+LLM_INPUT_COST_PER_1M=
+LLM_OUTPUT_COST_PER_1M=
 
 DATABASE_URL=postgresql://postgres:password@localhost:5432/signalstack
 DATABASE_URL_TEST=postgresql://postgres:password@localhost:5432/signalstack_test
@@ -482,8 +482,8 @@ Open:
 | `GITHUB_TOKEN` | Yes | GitHub repository and commit analysis. |
 | `OPENAI_API_KEY` | Yes | AI signal generation and grounded assessment. |
 | `OPENAI_MODEL` | No | Model name used by the OpenAI client. |
-| `LLM_INPUT_COST_PER_1M` | Recommended | Current input-token price per 1M tokens for estimated-cost metrics. |
-| `LLM_OUTPUT_COST_PER_1M` | Recommended | Current output-token price per 1M tokens for estimated-cost metrics. |
+| `LLM_INPUT_COST_PER_1M` | Optional | Current input-token price per 1M tokens for estimated-cost metrics. Defaults are inferred for common OpenAI text models. |
+| `LLM_OUTPUT_COST_PER_1M` | Optional | Current output-token price per 1M tokens for estimated-cost metrics. Defaults are inferred for common OpenAI text models. |
 | `DATABASE_URL` | Recommended | Production database connection. |
 | `DATABASE_URL_TEST` | Test only | Integration test database. |
 | `REDIS_URL` | Recommended | Redis cache and job evaluation queue. |

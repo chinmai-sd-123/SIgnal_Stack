@@ -15,6 +15,7 @@ from app.services.bulk_evaluation_service import (
     mark_job_submissions_queued,
     queue_job_evaluation,
 )
+from app.services.submission_proof_service import sync_job_invite_proofs
 
 router = APIRouter()
 
@@ -214,6 +215,7 @@ def queue_job_applications_for_evaluation(
     rerun_evaluated = bool(options.get("rerun_evaluated", False))
     retry_failed_only = bool(options.get("retry_failed_only", False))
 
+    sync_job_invite_proofs(db, job_id)
     progress = get_job_evaluation_progress(db, job_id)
     if (progress.get("active_count", 0) > 0 or progress.get("queue_active")) and not rerun_evaluated:
         return {
@@ -233,7 +235,7 @@ def queue_job_applications_for_evaluation(
         retry_failed_only=retry_failed_only,
     )
 
-    if queued_count == 0:
+    if queued_count == 0 and (not include_deep_evaluation or progress.get("evaluated_count", 0) == 0):
         return {
             "job_id": job_id,
             "task_id": None,

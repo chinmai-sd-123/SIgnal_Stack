@@ -110,6 +110,38 @@ class _FakeSubmissionQueueDb:
         self.commits += 1
 
 
+class _FakeEvaluatedCandidateQuery:
+    def __init__(self, candidates):
+        self.candidates = candidates
+        self.limit_value = None
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        self.candidates.sort(key=lambda candidate: candidate.evaluation_score or 0, reverse=True)
+        return self
+
+    def limit(self, value):
+        self.limit_value = value
+        return self
+
+    def all(self):
+        if self.limit_value is None:
+            return self.candidates
+        return self.candidates[:self.limit_value]
+
+
+class _FakeEvaluatedCandidateDb:
+    def __init__(self, candidates):
+        self.candidates = candidates
+
+    def query(self, model):
+        if model is JobCandidate:
+            return _FakeEvaluatedCandidateQuery(self.candidates)
+        return _FakeRecoveryQuery([])
+
+
 class _Proof:
     def __init__(self, invite_submission_id, outcome_id="outcome-1"):
         self.outcome_id = outcome_id
@@ -243,3 +275,33 @@ def test_mark_job_submissions_queued_can_retry_failed_only():
     assert failed.status == "queued"
     assert evaluated.status == "evaluated"
     assert db.candidates[0].candidate_id == "failed"
+
+
+@pytest.mark.unit
+def test_deep_evaluation_plan_includes_all_previously_evaluated_candidates():
+    old_candidate = JobCandidate(
+        id="jc-old",
+        job_id="job-1",
+        candidate_id="old",
+        evaluation_score=90,
+        evaluation_data={"signals": {"tests_present": 1}},
+    )
+    new_candidate = JobCandidate(
+        id="jc-new",
+        job_id="job-1",
+        candidate_id="new",
+        evaluation_score=80,
+        evaluation_data={"signals": {"readme_quality_score": 1}},
+    )
+    signals = {"new": {"commit_count": 1}}
+
+    candidate_ids = bulk._candidate_ids_for_deep_evaluation(
+        _FakeEvaluatedCandidateDb([new_candidate, old_candidate]),
+        "job-1",
+        100,
+        signals,
+    )
+
+    assert candidate_ids == ["old", "new"]
+    assert signals["old"] == {"tests_present": 1}
+    assert signals["new"] == {"commit_count": 1}
