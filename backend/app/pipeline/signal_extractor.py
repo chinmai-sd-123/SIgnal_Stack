@@ -162,10 +162,17 @@ class SignalExtractor:
             from app.pipeline.identity_verifier import (
                 resolve_candidate_identities,
                 calculate_authorship_from_identity,
+                classify_identity_match,
             )
             _identity   = resolve_candidate_identities(_candidate_info, author_map)
             _auth_stats = calculate_authorship_from_identity(_identity, author_map)
-            signals["authorship_fraction"] = _auth_stats["authorship_fraction"]
+            _identity_status = classify_identity_match(_candidate_info, _identity, author_map)
+            if _identity_status["basis"] == "verified":
+                signals["authorship_fraction"] = _auth_stats["authorship_fraction"]
+            elif _auth_stats["authorship_fraction"] > 0:
+                signals["authorship_claimed_fraction"] = _auth_stats["authorship_fraction"]
+                signals["authorship_requires_manual_review"] = 1.0
+            _auth_stats["identity_status"] = _identity_status
             signals["_authorship_stats"]   = _auth_stats
 
         # ── Deterministic signal layer ────────────────────────────────────────
@@ -526,50 +533,68 @@ class SignalExtractor:
             from app.pipeline.identity_verifier import (
                 resolve_candidate_identities,
                 calculate_authorship_from_identity,
+                classify_identity_match,
             )
             identity       = resolve_candidate_identities(_identity_data, author_map)
             auth_stats     = calculate_authorship_from_identity(identity, author_map)
+            auth_stats["identity_status"] = classify_identity_match(_identity_data, identity, author_map)
             matched_emails = auth_stats.get("matched_emails", [])
 
         # ── Build evidence snippet ─────────────────────────────────────────────
         def _norm(text: str) -> str:
             return unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode().lower().strip()
 
-        authors: Dict[str, int] = {}
+        authors: Dict[str, Dict[str, Any]] = {}
         for c in commits:
             name = c.get("author_name", "Unknown")
             if "bot" in name.lower():
                 continue
-            authors[name] = authors.get(name, 0) + 1
+            email = (c.get("author_email", "") or "").lower().strip()
+            if name not in authors:
+                authors[name] = {"count": 0, "emails": set()}
+            authors[name]["count"] += 1
+            if email:
+                authors[name]["emails"].add(email)
 
         cand_norm = _norm(_resolved_name)
-        sorted_authors = sorted(authors.items(), key=lambda x: x[1], reverse=True)
+        sorted_authors = sorted(authors.items(), key=lambda x: x[1]["count"], reverse=True)
 
         snippet  = f"Task: {task_title}\n\n"
         snippet += f"Candidate: '{_resolved_name}'\n"
 
         if auth_stats:
+            identity_status = auth_stats.get("identity_status", {})
+            basis = identity_status.get("basis", "unverified")
             snippet += (
                 f"Authorship Fraction (deterministic): "
                 f"{auth_stats['authorship_fraction']:.1%} "
                 f"({auth_stats['candidate_commits']}/{auth_stats['total_commits']} commits)\n"
                 f"Matched Emails: {matched_emails or 'none'}\n"
+                f"Identity Basis: {basis.replace('_', ' ')}\n"
             )
 
         snippet += "\nCommit Author Breakdown (last 50):\n"
-        for auth, count in sorted_authors[:10]:
+        matched_email_set = {m.lower() for m in matched_emails}
+        for auth, data in sorted_authors[:10]:
+            count = data["count"]
             pct = (count / len(commits)) * 100
             auth_norm = _norm(auth)
             is_match = (
                 auth_norm in cand_norm
                 or cand_norm in auth_norm
-                or any(m in author_map for m in matched_emails)
+                or bool(data["emails"] & matched_email_set)
             )
             tag = " ✓ MATCHED" if is_match else ""
             snippet += f"  {auth}: {count} commits ({pct:.1f}%){tag}\n"
 
         if auth_stats:
-            if auth_stats["authorship_fraction"] < 0.2:
+            basis = auth_stats.get("identity_status", {}).get("basis", "unverified")
+            if basis != "verified" and auth_stats["authorship_fraction"] > 0:
+                snippet += (
+                    "\n⚠ AUTHORSHIP NEEDS REVIEW: commit metadata matches the submitted GitHub handle, "
+                    "but candidate name/email did not confirm ownership."
+                )
+            elif auth_stats["authorship_fraction"] < 0.2:
                 snippet += "\n⚠ LOW AUTHORSHIP: Candidate appears to own less than 20% of commits."
             elif auth_stats["authorship_fraction"] >= 0.5:
                 snippet += "\n✓ AUTHORSHIP CONFIRMED: Candidate is a primary contributor."

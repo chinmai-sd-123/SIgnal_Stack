@@ -24,6 +24,14 @@ class CandidateIdentity:
     matched_emails: Set[str]  # Emails from commit history that match
 
 
+def _clean_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def _clean_username(username: str) -> str:
+    return (username or "").strip().strip("@").lower()
+
+
 def normalize_name(name: str) -> str:
     """
     Normalize a name for comparison:
@@ -206,4 +214,61 @@ def calculate_authorship_from_identity(
         "candidate_lines":     candidate_lines,
         "total_lines":         total_lines,
         "matched_emails":      matched_authors,
+    }
+
+
+def classify_identity_match(
+    candidate: Dict[str, Any],
+    identity: CandidateIdentity,
+    author_map: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Classify how strong the authorship identity match is.
+
+    A submitted GitHub handle is useful evidence, but by itself it is still a
+    candidate claim. To avoid falsely confirming ownership when someone submits
+    another user's repo/handle, we only call authorship verified when commit
+    metadata also matches candidate email or candidate name.
+    """
+    candidate_email = _clean_email(candidate.get("email", "") or candidate.get("candidate_email", ""))
+    candidate_name = candidate.get("name", "") or candidate.get("candidate_name", "")
+    candidate_username = _clean_username(candidate.get("github_username", ""))
+
+    matched_emails = {_clean_email(email) for email in identity.matched_emails}
+    exact_email_match = bool(candidate_email and candidate_email in matched_emails)
+    name_match = False
+    github_handle_match = False
+
+    for email in matched_emails:
+        author_data = author_map.get(email) or {}
+        author_name = author_data.get("name", "")
+        github_login = _clean_username(author_data.get("github_login", ""))
+        noreply_username = extract_github_username_from_noreply(email)
+        email_prefix = re.sub(r"\d+$", "", email.split("@")[0])
+
+        if candidate_name and author_name and fuzzy_match_name(candidate_name, author_name, threshold=0.67):
+            name_match = True
+
+        if candidate_username and (
+            github_login == candidate_username
+            or noreply_username == candidate_username
+            or email_prefix == candidate_username
+        ):
+            github_handle_match = True
+
+    if exact_email_match or name_match:
+        basis = "verified"
+    elif github_handle_match:
+        basis = "claimed_github_handle_only"
+    elif matched_emails:
+        basis = "weak_metadata_match"
+    else:
+        basis = "unverified"
+
+    return {
+        "basis": basis,
+        "exact_email_match": exact_email_match,
+        "name_match": name_match,
+        "github_handle_match": github_handle_match,
+        "requires_manual_review": basis != "verified",
     }
