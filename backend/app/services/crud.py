@@ -1,9 +1,56 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy.exc import OperationalError
 import app.models as models
 import app.schemas as schemas
 import json
 import uuid
+import time
+
+MAX_STORED_EVIDENCE_ITEMS = 3
+MAX_STORED_SNIPPET_CHARS = 1200
+
+
+def _trim_text(value: str, limit: int = MAX_STORED_SNIPPET_CHARS) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n[... truncated for report storage ...]"
+
+
+def _compact_evidence_items(items):
+    compacted = []
+    for item in list(items or [])[:MAX_STORED_EVIDENCE_ITEMS]:
+        if hasattr(item, "model_dump"):
+            item = item.model_dump()
+        compacted.append({
+            **item,
+            "snippet": _trim_text(item.get("snippet", "")),
+        })
+    return compacted
+
+
+def _compact_evaluation_payload(evaluation: schemas.EvaluationResponse) -> dict:
+    payload = evaluation.model_dump()
+    compact_allocations = []
+
+    for allocation in payload.get("work_allocation") or []:
+        allocation = dict(allocation)
+        allocation["evidence"] = _compact_evidence_items(allocation.get("evidence"))
+
+        compact_top_candidates = []
+        for candidate in allocation.get("top_candidates") or []:
+            candidate = dict(candidate)
+            candidate["evidence"] = _compact_evidence_items(candidate.get("evidence"))
+            compact_top_candidates.append(candidate)
+
+        allocation["top_candidates"] = compact_top_candidates
+        compact_allocations.append(allocation)
+
+    payload["work_allocation"] = compact_allocations
+    if payload.get("raw_output"):
+        payload["raw_output"] = {"omitted": "raw output omitted from stored report payload"}
+    return payload
 
 def get_outcome(db: Session, outcome_id: str):
     return db.query(models.Outcome).filter(models.Outcome.id == outcome_id).first()
@@ -244,18 +291,26 @@ def get_proofs(db: Session, outcome_id: str):
     return db.query(models.Proof).filter(models.Proof.outcome_id == outcome_id).all()
 
 def create_evaluation(db: Session, evaluation: schemas.EvaluationResponse):
+    evaluation_payload = _compact_evaluation_payload(evaluation)
+    work_allocation = evaluation_payload.get("work_allocation") or []
     db_eval = models.Evaluation(
         job_id=evaluation.job_id,
         outcome_id=evaluation.job_id,
         status="completed",
-        evaluation_json=evaluation.model_dump(),
+        evaluation_json=evaluation_payload,
         fit_score=evaluation.fit_score,
-        work_allocation=[item.model_dump() for item in evaluation.work_allocation],
+        work_allocation=work_allocation,
         confidence=evaluation.evidence_confidence,
         risk_flags=evaluation.risk_flags,
     )
     db.add(db_eval)
-    db.commit()
+    try:
+        db.commit()
+    except OperationalError:
+        db.rollback()
+        time.sleep(0.2)
+        db.add(db_eval)
+        db.commit()
     db.refresh(db_eval)
     return db_eval
 

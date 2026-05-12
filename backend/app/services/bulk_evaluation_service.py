@@ -714,7 +714,9 @@ def _deep_evaluate_top_candidates(
     evaluations_created = 0
 
     for outcome in outcomes:
-        latest = _latest_evaluation_for_outcome(db, outcome.id)
+        outcome_id = outcome.id
+        outcome_title = outcome.title
+        latest = _latest_evaluation_for_outcome(db, outcome_id)
         existing_response = _evaluation_from_payload(latest.evaluation_json) if latest else None
         existing_candidate_ids = {
             item.candidate_id
@@ -733,7 +735,7 @@ def _deep_evaluate_top_candidates(
             continue
 
         proofs = db.query(Proof).filter(
-            Proof.outcome_id == outcome.id,
+            Proof.outcome_id == outcome_id,
             Proof.candidate_id.in_(candidate_ids_to_evaluate),
         ).all()
         if not proofs:
@@ -745,6 +747,7 @@ def _deep_evaluate_top_candidates(
             candidate_id: signals_by_candidate.get(candidate_id, {})
             for candidate_id in candidate_ids
         }
+        db.rollback()
 
         if hasattr(evaluator, "evaluate_batched"):
             delta_evaluation = evaluator.evaluate_batched(outcome_schema, proof_schemas, signals_map)
@@ -756,14 +759,15 @@ def _deep_evaluate_top_candidates(
             if existing_response
             else delta_evaluation
         )
+        db.rollback()
         crud.create_evaluation(db, evaluation)
         evaluations_created += 1
 
         for summary in evaluation.candidate_summaries:
             deep_scores[summary.candidate_id].append(summary.overall_score)
             deep_payloads[summary.candidate_id].append({
-                "outcome_id": outcome.id,
-                "outcome_title": outcome.title,
+                "outcome_id": outcome_id,
+                "outcome_title": outcome_title,
                 "overall_score": summary.overall_score,
                 "capability_score": summary.capability_score,
                 "evidence_confidence": summary.evidence_confidence,
