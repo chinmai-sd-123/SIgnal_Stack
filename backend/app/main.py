@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.config.database import engine
+from sqlalchemy.orm import Session
+from app.config.database import engine, get_db
 import app.models as models
 
 # Create tables
@@ -110,29 +111,19 @@ def prometheus_metrics():
 
 # Admin LLM Logs endpoint
 @app.get("/admin/evaluations/{evaluation_id}/llm_logs")
-def get_evaluation_llm_logs(evaluation_id: int):
+def get_evaluation_llm_logs(evaluation_id: int, db: Session = Depends(get_db)):
     """Get LLM logs for a specific evaluation."""
     from app.services.llm_summarizer import get_llm_logs_for_evaluation
-    from app.config.database import SessionLocal
-    db = SessionLocal()
-    try:
-        logs = get_llm_logs_for_evaluation(db, evaluation_id)
-        return {"evaluation_id": evaluation_id, "logs": logs}
-    finally:
-        db.close()
+    logs = get_llm_logs_for_evaluation(db, evaluation_id)
+    return {"evaluation_id": evaluation_id, "logs": logs}
 
 # Weight History endpoint
 @app.get("/admin/weight-history")
-def get_weight_history(signal_name: str = None, limit: int = 50):
+def get_weight_history(signal_name: str = None, limit: int = 50, db: Session = Depends(get_db)):
     """Get weight change history for audit."""
     from app.services.weight_updater import get_weight_history as get_history
-    from app.config.database import SessionLocal
-    db = SessionLocal()
-    try:
-        history = get_history(db, signal_name, limit)
-        return {"history": history}
-    finally:
-        db.close()
+    history = get_history(db, signal_name, limit)
+    return {"history": history}
 
 if __name__ == "__main__":
     import uvicorn

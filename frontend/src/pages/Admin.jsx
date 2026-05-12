@@ -28,9 +28,9 @@ export default function Admin() {
                 const data = await res.json();
                 setAuditLogs(data);
             } else if (activeTab === 'llm') {
-                const res = await fetch(`${API_BASE}/admin/feedback`);
-                const feedbackData = await res.json();
-                setLlmLogs(feedbackData);
+                const res = await fetch(`${API_BASE}/admin/llm-logs`);
+                const logData = await res.json();
+                setLlmLogs(logData);
             }
         } catch (error) {
             console.error('Error fetching data:', error);
@@ -128,7 +128,7 @@ export default function Admin() {
                                                 <div key={i} className="flex items-center justify-between bg-white rounded-lg p-3 text-sm border border-gray-100">
                                                     <span className="font-medium text-gray-900">{h.signal_name}</span>
                                                     <div className="flex items-center gap-4">
-                                                        <span className="badge badge-neutral">{h.old_weight} → {h.new_weight}</span>
+                                                        <span className="badge badge-neutral">{h.old_weight} -&gt; {h.new_weight}</span>
                                                         <span className="text-xs text-gray-500">{h.change_reason}</span>
                                                         <span className="text-xs text-gray-400">{h.created_at?.split('T')[0]}</span>
                                                     </div>
@@ -190,11 +190,16 @@ export default function Admin() {
                                                 >
                                                     <div className="flex items-center gap-3">
                                                         <FileText className="w-4 h-4 text-primary" />
-                                                        <span className="font-medium text-gray-900">Job: {log.job_id}</span>
-                                                        <span className={`px-2 py-0.5 rounded text-xs ${log.result === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                                        <span className="font-medium text-gray-900">Evaluation: {log.evaluation_id || 'N/A'}</span>
+                                                        <span className={`px-2 py-0.5 rounded text-xs ${log.is_valid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                                                             }`}>
-                                                            {log.result}
+                                                            {log.is_valid ? 'valid' : 'invalid'}
                                                         </span>
+                                                        {log.latency_ms != null && (
+                                                            <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600">
+                                                                {Math.round(log.latency_ms)} ms
+                                                            </span>
+                                                        )}
                                                     </div>
                                                     <div className="flex items-center gap-3">
                                                         <span className="text-xs text-gray-500">{log.created_at?.split('T')[0]}</span>
@@ -204,7 +209,10 @@ export default function Admin() {
                                                 {expandedLog === i && (
                                                     <div className="p-4 border-t border-gray-100 bg-gray-50">
                                                         <pre className="text-xs text-gray-600 overflow-x-auto font-mono">
-                                                            {JSON.stringify(log.metrics, null, 2)}
+                                                            {JSON.stringify({
+                                                                prompt: log.prompt,
+                                                                raw_response: log.raw_response,
+                                                            }, null, 2)}
                                                         </pre>
                                                     </div>
                                                 )}

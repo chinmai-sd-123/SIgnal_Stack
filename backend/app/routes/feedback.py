@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import app.schemas as schemas
 from app.config.database import get_db
+from app.monitoring import track_feedback
 from app.services import crud
 from app.pipeline.feedback import FeedbackLoop
 
@@ -11,16 +12,24 @@ router = APIRouter(tags=["Feedback"])
 @router.post("/plugin/feedback")
 def submit_feedback(feedback: schemas.FeedbackCreate, db: Session = Depends(get_db)):
     # Store feedback
-    crud.create_feedback(db, feedback)
+    db_feedback = crud.create_feedback(db, feedback)
     
     # Mark Evaluation as Complete (Human Action Taken)
     crud.mark_evaluation_complete(db, feedback.job_id, feedback.metrics)
     
     # Trigger Learning Loop (Update Weights)
     loop = FeedbackLoop(db)
-    changes = loop.process_feedback(feedback)
+    changes = loop.process_feedback(db_feedback)
+
+    crud.create_audit_log(db, "feedback", str(db_feedback.id), "recorded", {
+        "job_id": feedback.job_id,
+        "evaluation_id": db_feedback.evaluation_id,
+        "result": feedback.result,
+        "changes": changes,
+    })
+    track_feedback()
         
-    return {"status": "feedback_recorded", "changes": changes}
+    return {"status": "feedback_recorded", "feedback_id": db_feedback.id, "changes": changes}
 
 @router.put("/feedback/reset/{job_id}")
 def reset_decision(job_id: str, db: Session = Depends(get_db)):
@@ -75,6 +84,25 @@ def get_audit_logs(db: Session = Depends(get_db)):
 def get_feedback_list(db: Session = Depends(get_db)):
     feedback = crud.get_feedback_list(db)
     return [{"id": f.id, "job_id": f.job_id, "result": f.result, "metrics": f.metrics_json, "created_at": f.created_at.isoformat()} for f in feedback]
+
+@router.get("/admin/task-weight-history")
+def get_task_weight_history(limit: int = 100, db: Session = Depends(get_db)):
+    from app.models.task import TaskWeightHistory
+
+    rows = db.query(TaskWeightHistory).order_by(TaskWeightHistory.created_at.desc()).limit(limit).all()
+    return [
+        {
+            "id": row.id,
+            "task_id": row.task_id,
+            "outcome_id": row.outcome_id,
+            "old_weight": row.old_weight,
+            "new_weight": row.new_weight,
+            "reason": row.reason,
+            "feedback_source_job_id": row.feedback_source_job_id,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
 
 @router.get("/admin/llm-logs")
 def get_all_llm_logs(db: Session = Depends(get_db)):

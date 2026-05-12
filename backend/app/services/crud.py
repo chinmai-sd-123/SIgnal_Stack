@@ -342,6 +342,12 @@ def create_feedback(db: Session, feedback: schemas.FeedbackCreate):
         eval_id = feedback.evaluation_id
     elif isinstance(feedback.evaluation_id, str) and feedback.evaluation_id.isdigit():
         eval_id = int(feedback.evaluation_id)
+    if eval_id is None and feedback.job_id:
+        latest_eval = db.query(models.Evaluation).filter(
+            models.Evaluation.job_id == feedback.job_id
+        ).order_by(desc(models.Evaluation.created_at)).first()
+        if latest_eval:
+            eval_id = latest_eval.id
     db_feedback = models.Feedback(
         evaluation_id=eval_id,
         job_id=feedback.job_id,

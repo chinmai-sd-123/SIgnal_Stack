@@ -240,6 +240,24 @@ export async function getSignalWeights() {
     return response.json();
 }
 
+export async function getWeightHistory(limit = 100) {
+    const response = await fetch(`${API_URL}/admin/weight-history?limit=${limit}`);
+    if (!response.ok) throw new Error("Failed to fetch weight history");
+    return response.json();
+}
+
+export async function getTaskWeightHistory(limit = 100) {
+    const response = await fetch(`${API_URL}/admin/task-weight-history?limit=${limit}`);
+    if (!response.ok) throw new Error("Failed to fetch task weight history");
+    return response.json();
+}
+
+export async function getLlmLogs() {
+    const response = await fetch(`${API_URL}/admin/llm-logs`);
+    if (!response.ok) throw new Error("Failed to fetch LLM logs");
+    return response.json();
+}
+
 export async function resetDecision(jobId) {
     const response = await fetch(`${API_URL}/feedback/reset/${jobId}`, {
         method: "PUT",

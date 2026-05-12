@@ -3,8 +3,8 @@ from typing import List, Dict, Any
 
 from sqlalchemy.orm import Session
 import app.models as models
-from app.services import crud
 import app.schemas as schemas
+from app.services.weight_updater import update_weight
 
 
 logger = logging.getLogger(__name__)
@@ -34,16 +34,18 @@ class FeedbackLoop:
                 signals_used = eval_data.get("global_signals_used", [])
                 
                 # Adjust weights based on result
-                adjustment = 0.1 if feedback.result == "success" else -0.1
+                feedback_score = 1.0 if feedback.result == "success" else -1.0
                 
                 for signal in signals_used:
-                    # Get current weight (default 1.0 if not found)
-                    current_weight_obj = self.db.query(models.SignalWeight).filter(models.SignalWeight.signal_name == signal).first()
-                    current_weight = current_weight_obj.weight if current_weight_obj else 1.0
-                    
-                    new_weight = max(0.1, min(2.0, current_weight + adjustment)) # Clamp between 0.1 and 2.0
-                    crud.update_signal_weight(self.db, signal, new_weight)
-                    changes.append(f"Updated {signal} to {new_weight:.2f}")
+                    result = update_weight(
+                        self.db,
+                        signal_name=signal,
+                        feedback_score=feedback_score,
+                        feedback_id=feedback.id,
+                    )
+                    changes.append(
+                        f"Updated {signal}: {result['old_weight']:.2f} -> {result['new_weight']:.2f}"
+                    )
         
         if not changes:
             changes.append("No signals found to update")

@@ -221,12 +221,15 @@ class Evaluator:
                         ]
                         for k in sig_keys:
                             val = cand_signals.get(k, 0)
+                            signal_value = val.get("value", 0) if isinstance(val, dict) else val
+                            if isinstance(signal_value, (int, float)) and signal_value > 0:
+                                global_signals_used.add(k)
                             label = k.replace('_', ' ').title()
                             # Boolean signals → YES/NO; numeric signals → their value
                             if k in ("commit_count", "unique_authors", "recent_activity_score", "readme_quality_score"):
-                                status = str(round(val, 3)) if isinstance(val, float) else str(val)
+                                status = str(round(signal_value, 3)) if isinstance(signal_value, float) else str(signal_value)
                             else:
-                                status = "YES" if val > 0 else "NO"
+                                status = "YES" if signal_value > 0 else "NO"
                             sig_snippet += f"- {label}: {status}\n"
                         
                         task_evidence.append(schemas.Evidence(
