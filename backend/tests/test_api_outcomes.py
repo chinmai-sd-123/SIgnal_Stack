@@ -137,10 +137,65 @@ def test_invited_candidate_is_backfilled_to_outcome_created_after_submission(cli
     proofs = proofs_resp.json()
 
     assert len(proofs) == 1
-    assert proofs[0]["candidate_id"] == "candidate-one"
+    assert proofs[0]["candidate_id"] == "candidate@example.com"
     assert proofs[0]["payload"]["repo_url"] == "https://github.com/candidate-one/health-monitor"
     assert proofs[0]["payload"]["resume_url"] == "https://drive.google.com/resume"
     assert proofs[0]["payload"]["artifact_link"] == ""
+
+
+@pytest.mark.integration
+def test_invite_submissions_with_same_github_are_separate_candidates(client):
+    job_resp = client.post("/jobs", json={
+        "title": "AI Engineer Intern",
+        "description": "Evaluate AI projects",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Software Engineering",
+        "job_type": "Internship",
+    })
+    assert job_resp.status_code == 200
+    job_id = job_resp.json()["id"]
+
+    outcome_resp = client.post("/outcomes", json={
+        "job_id": job_id,
+        "title": "Productionize AI Backend Services",
+        "description": "Turn prototypes into APIs",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Software Engineering",
+        "job_type": "Internship",
+        "tasks": [
+            {"name": "Expose AI workflow through API", "priority": "High", "weight": 1.0},
+        ],
+    })
+    assert outcome_resp.status_code == 200
+    outcome_id = outcome_resp.json()["id"]
+
+    invite_resp = client.post(f"/jobs/{job_id}/invites")
+    assert invite_resp.status_code == 200
+    token = invite_resp.json()["token"]
+
+    for name, email, repo in [
+        ("Johny", "john@example.com", "https://github.com/chinmai-sd-123/AI_coach"),
+        ("Chinmai", "power@example.com", "https://github.com/chinmai-sd-123/SIgnal_Stack"),
+    ]:
+        submit_resp = client.post(f"/invites/{token}/submit", json={
+            "candidate_name": name,
+            "candidate_email": email,
+            "github_username": "chinmai-sd-123",
+            "repo_url": repo,
+        })
+        assert submit_resp.status_code == 200
+
+    proofs_resp = client.get(f"/proofs/{outcome_id}")
+    assert proofs_resp.status_code == 200
+    proofs = proofs_resp.json()
+
+    assert {proof["candidate_id"] for proof in proofs} == {"john@example.com", "power@example.com"}
+    assert {proof["payload"]["repo_url"] for proof in proofs} == {
+        "https://github.com/chinmai-sd-123/AI_coach",
+        "https://github.com/chinmai-sd-123/SIgnal_Stack",
+    }
 
 
 @pytest.mark.integration

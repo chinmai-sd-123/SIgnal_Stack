@@ -20,6 +20,7 @@ from app.pipeline.signal_extractor import SignalExtractor
 from app.monitoring import track_evaluation_complete, track_evaluation_start
 from app.services import crud
 from app.services.cache import cache
+from app.services.submission_proof_service import get_candidate_id
 from app.services.worker_queue import TaskStatus, worker_queue
 from app.utils.time_utils import utc_now
 
@@ -208,7 +209,7 @@ def has_running_job_evaluation(progress: Dict[str, Any]) -> bool:
 
 
 def candidate_id_for_submission(submission: InviteSubmission) -> str:
-    return submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
+    return get_candidate_id(submission)
 
 
 def ensure_job_candidate(db, job_id: str, candidate_id: str, status: str = "submitted") -> JobCandidate:
@@ -327,15 +328,33 @@ def _submission_payload_summary(submission: InviteSubmission) -> Dict[str, Any]:
 
 
 def _evaluated_candidate_rows(db, job_id: str, deep_limit: int) -> List[JobCandidate]:
+    valid_candidate_ids = _candidate_ids_for_job_submissions(db, job_id)
     query = db.query(JobCandidate).filter(
         JobCandidate.job_id == job_id,
         JobCandidate.evaluation_score.isnot(None),
-    ).order_by(JobCandidate.evaluation_score.desc())
+    )
+    if valid_candidate_ids:
+        query = query.filter(JobCandidate.candidate_id.in_(valid_candidate_ids))
+    query = query.order_by(JobCandidate.evaluation_score.desc())
 
     if deep_limit > 0:
         query = query.limit(deep_limit)
 
     return query.all()
+
+
+def _candidate_ids_for_job_submissions(db, job_id: str) -> set[str]:
+    submissions = db.query(InviteSubmission).filter(InviteSubmission.job_id == job_id).all()
+    return {candidate_id_for_submission(submission) for submission in submissions}
+
+
+def _submission_needs_candidate_evaluation(db, submission: InviteSubmission) -> bool:
+    candidate_id = candidate_id_for_submission(submission)
+    candidate = db.query(JobCandidate).filter(
+        JobCandidate.job_id == submission.job_id,
+        JobCandidate.candidate_id == candidate_id,
+    ).first()
+    return not candidate or candidate.evaluation_score is None
 
 
 def _signals_from_candidate(candidate: JobCandidate) -> Dict[str, Any]:
@@ -678,6 +697,16 @@ def mark_job_submissions_queued(
         InviteSubmission.job_id == job_id,
         InviteSubmission.status.in_(statuses),
     ).all()
+    if not rerun_evaluated and not retry_failed_only:
+        evaluated_submissions = db.query(InviteSubmission).filter(
+            InviteSubmission.job_id == job_id,
+            InviteSubmission.status.in_(list(TERMINAL_EVALUATED_STATUSES)),
+        ).all()
+        submissions.extend(
+            submission
+            for submission in evaluated_submissions
+            if _submission_needs_candidate_evaluation(db, submission)
+        )
 
     for submission in submissions:
         submission.status = "queued"
@@ -695,7 +724,11 @@ def mark_job_submissions_queued(
 
 def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
     submissions = db.query(InviteSubmission).filter(InviteSubmission.job_id == job_id).all()
-    candidates = db.query(JobCandidate).filter(JobCandidate.job_id == job_id).all()
+    valid_candidate_ids = {candidate_id_for_submission(submission) for submission in submissions}
+    candidate_query = db.query(JobCandidate).filter(JobCandidate.job_id == job_id)
+    if valid_candidate_ids:
+        candidate_query = candidate_query.filter(JobCandidate.candidate_id.in_(valid_candidate_ids))
+    candidates = candidate_query.all()
     outcomes = db.query(Outcome).filter(Outcome.job_id == job_id).all()
     outcome_ids = [outcome.id for outcome in outcomes]
 
@@ -752,6 +785,9 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
         "top_candidates": [
             {
                 "candidate_id": c.candidate_id,
+                "candidate_name": ((c.evaluation_data or {}).get("submission") or {}).get("candidate_name"),
+                "candidate_email": ((c.evaluation_data or {}).get("submission") or {}).get("candidate_email"),
+                "repo_url": ((c.evaluation_data or {}).get("submission") or {}).get("repo_url"),
                 "status": c.status,
                 "score": c.evaluation_score,
                 "coverage": c.outcome_coverage,

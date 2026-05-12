@@ -7,7 +7,13 @@ from app.models.proof import Proof
 
 def get_candidate_id(submission: InviteSubmission) -> str:
     """Derive a stable candidate id from invite submission data."""
-    return submission.github_username or submission.candidate_email or f"sub_{submission.id[:8]}"
+    email = (submission.candidate_email or "").strip().lower()
+    if email:
+        return email
+    github_username = (submission.github_username or "").strip()
+    if github_username:
+        return github_username
+    return f"sub_{submission.id[:8]}"
 
 
 def proof_payload_for_submission(submission: InviteSubmission):
@@ -33,10 +39,20 @@ def create_proof_for_outcome(db: Session, submission: InviteSubmission, outcome:
 
     existing = db.query(Proof).filter(
         Proof.outcome_id == outcome.id,
-        Proof.candidate_id == candidate_id,
-    ).first()
-    if existing:
-        return False
+    ).all()
+    for proof in existing:
+        payload = proof.payload_json or {}
+        if payload.get("source") == "invite" and payload.get("invite_submission_id") == submission.id:
+            proof.candidate_id = candidate_id
+            proof.type = "github" if submission.repo_url else "work_artifact"
+            proof.payload_json = proof_payload_for_submission(submission)
+            return True
+
+    same_candidate_legacy = next((proof for proof in existing if proof.candidate_id == candidate_id), None)
+    if same_candidate_legacy and not (same_candidate_legacy.payload_json or {}).get("invite_submission_id"):
+        same_candidate_legacy.payload_json = proof_payload_for_submission(submission)
+        same_candidate_legacy.type = "github" if submission.repo_url else "work_artifact"
+        return True
 
     proof = Proof(
         outcome_id=outcome.id,

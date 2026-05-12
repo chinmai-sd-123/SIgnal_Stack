@@ -42,11 +42,10 @@ def _create_proofs_for_submission(db: Session, submission: InviteSubmission, job
 
 def _delete_proofs_for_submission(db: Session, submission: InviteSubmission):
     """Delete all Proof records associated with a submission."""
-    candidate_id = _get_candidate_id(submission)
-    # Delete proofs that were created from this submission
-    proofs = db.query(Proof).filter(
-        Proof.candidate_id == candidate_id,
-    ).all()
+    outcome_ids = [row[0] for row in db.query(Outcome.id).filter(Outcome.job_id == submission.job_id).all()]
+    if not outcome_ids:
+        return 0
+    proofs = db.query(Proof).filter(Proof.outcome_id.in_(outcome_ids)).all()
 
     deleted = 0
     for proof in proofs:
@@ -64,9 +63,7 @@ def _update_proofs_for_submission(db: Session, submission: InviteSubmission, old
     new_candidate_id = _get_candidate_id(submission)
 
     # Find proofs linked to this submission
-    proofs = db.query(Proof).filter(
-        Proof.candidate_id == old_candidate_id,
-    ).all()
+    proofs = db.query(Proof).filter(Proof.candidate_id.in_([old_candidate_id, new_candidate_id])).all()
 
     for proof in proofs:
         payload = proof.payload_json or {}

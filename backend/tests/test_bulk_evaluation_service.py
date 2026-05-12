@@ -263,12 +263,13 @@ class _FakeEvaluator:
 
 
 def _add_submission_with_proofs(db, invite, job_id, outcomes, candidate_id, status="submitted"):
+    email = f"{candidate_id}@example.com"
     submission = InviteSubmission(
         id=f"sub-{candidate_id}",
         invite_id=invite.id,
         job_id=job_id,
         candidate_name=candidate_id.title(),
-        candidate_email=f"{candidate_id}@example.com",
+        candidate_email=email,
         github_username=candidate_id,
         repo_url=f"https://github.com/acme/{candidate_id}",
         status=status,
@@ -277,11 +278,12 @@ def _add_submission_with_proofs(db, invite, job_id, outcomes, candidate_id, stat
     for outcome in outcomes:
         db.add(Proof(
             outcome_id=outcome.id,
-            candidate_id=candidate_id,
+            candidate_id=email,
             type="github",
             payload_json={
                 "repo_url": submission.repo_url,
                 "github_username": candidate_id,
+                "candidate_email": email,
                 "invite_submission_id": submission.id,
             },
         ))
@@ -528,7 +530,7 @@ def test_staged_job_evaluation_refreshes_reports_with_later_candidates(db_sessio
             item["candidate_id"]
             for item in latest.evaluation_json["candidate_summaries"]
         }
-        assert candidate_ids == {"cand-a", "cand-b"}
+        assert candidate_ids == {"cand-a@example.com", "cand-b@example.com"}
 
     _add_submission_with_proofs(db_session, invite, job_id, outcomes, "cand-c")
 
@@ -549,7 +551,7 @@ def test_staged_job_evaluation_refreshes_reports_with_later_candidates(db_sessio
             item["candidate_id"]
             for item in latest.evaluation_json["candidate_summaries"]
         }
-        assert candidate_ids == {"cand-a", "cand-b", "cand-c"}
+        assert candidate_ids == {"cand-a@example.com", "cand-b@example.com", "cand-c@example.com"}
 
         status = next(
             item for item in progress["outcome_statuses"]

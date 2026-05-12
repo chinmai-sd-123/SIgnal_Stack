@@ -47,7 +47,7 @@ def test_invite_proof_payload_uses_resume_as_artifact_only_without_repo():
 
 
 @pytest.mark.unit
-def test_bulk_evaluation_candidate_id_prefers_github_username():
+def test_bulk_evaluation_candidate_id_prefers_candidate_email():
     submission = InviteSubmission(
         id="sub-3",
         candidate_name="Candidate Dev",
@@ -55,4 +55,4 @@ def test_bulk_evaluation_candidate_id_prefers_github_username():
         github_username="candidate-dev",
     )
 
-    assert candidate_id_for_submission(submission) == "candidate-dev"
+    assert candidate_id_for_submission(submission) == "candidate@example.com"
