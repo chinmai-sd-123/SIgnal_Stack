@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from typing import List
+import time
 import app.schemas as schemas
 from app.config.database import get_db
+from app.monitoring import track_evaluation_complete, track_evaluation_start
 from app.services import crud
 from app.pipeline.evaluator import Evaluator
 from app.pipeline.signal_extractor import SignalExtractor
@@ -12,28 +14,35 @@ router = APIRouter(tags=["Evaluator"])
 
 @router.post("/plugin/evaluate")
 def evaluate(request: schemas.EvaluateRequest, db: Session = Depends(get_db)):
-    # 1. Extract Signals
-    signals_map = {}
-    extractor = SignalExtractor()
-    for proof in request.proofs:
-        signals = extractor.extract_signals(proof)
-        signals_map[proof.candidate_id] = signals
-    
-    # 2. Evaluate using Allocation Engine
-    evaluator = Evaluator()
-    evaluation = evaluator.evaluate(request.outcome, request.proofs, signals_map)
-    
-    # 3. Store Evaluation (Persist the result)
-    crud.create_evaluation(db, evaluation)
-    
-    # 4. Audit Log
-    crud.create_audit_log(db, "evaluation", evaluation.job_id, "completed", {"fit_score": evaluation.fit_score, "candidates": [p.candidate_id for p in request.proofs]})
-    
-    return {
-        "job_id": evaluation.job_id,
-        "status": "completed",
-        "evaluation": evaluation
-    }
+    started_at = time.perf_counter()
+    track_evaluation_start()
+    success = False
+    try:
+        # 1. Extract Signals
+        signals_map = {}
+        extractor = SignalExtractor()
+        for proof in request.proofs:
+            signals = extractor.extract_signals(proof)
+            signals_map[proof.candidate_id] = signals
+
+        # 2. Evaluate using Allocation Engine
+        evaluator = Evaluator()
+        evaluation = evaluator.evaluate(request.outcome, request.proofs, signals_map)
+
+        # 3. Store Evaluation (Persist the result)
+        crud.create_evaluation(db, evaluation)
+
+        # 4. Audit Log
+        crud.create_audit_log(db, "evaluation", evaluation.job_id, "completed", {"fit_score": evaluation.fit_score, "candidates": [p.candidate_id for p in request.proofs]})
+
+        success = True
+        return {
+            "job_id": evaluation.job_id,
+            "status": "completed",
+            "evaluation": evaluation
+        }
+    finally:
+        track_evaluation_complete(time.perf_counter() - started_at, success=success)
 
 @router.get("/evaluations", response_model=List[schemas.EvaluationSummary])
 def get_evaluations(db: Session = Depends(get_db)):

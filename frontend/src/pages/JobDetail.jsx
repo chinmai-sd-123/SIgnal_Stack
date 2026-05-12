@@ -25,6 +25,7 @@ export default function JobDetail() {
     const [editForm, setEditForm] = useState({});
     const [evaluationProgress, setEvaluationProgress] = useState(null);
     const [queueingEvaluation, setQueueingEvaluation] = useState(false);
+    const [evaluationMessage, setEvaluationMessage] = useState('');
 
     const hasEvaluationActivity = useCallback((progress) => {
         if (!progress) return false;
@@ -73,7 +74,7 @@ export default function JobDetail() {
     }, [jobId]);
 
     useEffect(() => {
-        if (!hasEvaluationActivity(evaluationProgress)) return undefined;
+        if (!queueingEvaluation && !hasEvaluationActivity(evaluationProgress)) return undefined;
 
         const timer = setInterval(async () => {
             try {
@@ -84,7 +85,7 @@ export default function JobDetail() {
         }, 5000);
 
         return () => clearInterval(timer);
-    }, [evaluationProgress, hasEvaluationActivity, refreshEvaluationState]);
+    }, [evaluationProgress, hasEvaluationActivity, queueingEvaluation, refreshEvaluationState]);
 
     useEffect(() => {
         const refreshWhenVisible = async () => {
@@ -104,6 +105,11 @@ export default function JobDetail() {
             document.removeEventListener('visibilitychange', refreshWhenVisible);
         };
     }, [refreshEvaluationState]);
+
+    useEffect(() => {
+        if (!evaluationMessage || queueingEvaluation || hasEvaluationActivity(evaluationProgress)) return;
+        setEvaluationMessage('');
+    }, [evaluationMessage, evaluationProgress, hasEvaluationActivity, queueingEvaluation]);
 
     useEffect(() => {
         if (loading || location.hash !== '#outcomes') return;
@@ -190,6 +196,40 @@ export default function JobDetail() {
         await refreshEvaluationState();
     };
 
+    const buildOptimisticProgress = (result, totalSubmissions) => {
+        const queuedCount = Number(result?.queued_count || 0);
+        const previous = evaluationProgress || {};
+        const outcomeStatuses = outcomes.map(outcome => ({
+            outcome_id: outcome.id,
+            title: outcome.title,
+            status: previous.outcome_statuses?.find(item => item.outcome_id === outcome.id)?.status || 'pending',
+        }));
+
+        return {
+            job_id: jobId,
+            submissions_total: previous.submissions_total || totalSubmissions,
+            candidates_total: previous.candidates_total || totalSubmissions,
+            outcomes_total: previous.outcomes_total || outcomes.length,
+            outcomes_evaluated: previous.outcomes_evaluated || 0,
+            outcome_statuses: previous.outcome_statuses || outcomeStatuses,
+            submission_status_counts: {
+                ...(previous.submission_status_counts || {}),
+                queued: queuedCount || previous.submission_status_counts?.queued || totalSubmissions,
+            },
+            candidate_status_counts: {
+                ...(previous.candidate_status_counts || {}),
+                queued: queuedCount || previous.candidate_status_counts?.queued || totalSubmissions,
+            },
+            active_count: queuedCount || previous.active_count || totalSubmissions,
+            evaluated_count: previous.evaluated_count || 0,
+            top_candidates: previous.top_candidates || [],
+            queue_size: result?.task_id ? Math.max(1, previous.queue_size || 0) : previous.queue_size || 0,
+            queue_active: Boolean(result?.task_id || queuedCount || previous.queue_active),
+            global_queue_size: previous.global_queue_size || 0,
+            queue_backend: previous.queue_backend || 'starting',
+        };
+    };
+
     const handleQueueEvaluation = async () => {
         const totalSubmissions = invites.reduce((count, inv) => count + (inv.submissions?.length || 0), 0);
         if (totalSubmissions === 0) {
@@ -198,13 +238,17 @@ export default function JobDetail() {
         }
 
         setQueueingEvaluation(true);
+        setEvaluationMessage('Starting evaluation...');
         try {
-            await queueJobEvaluation(jobId, {
+            const result = await queueJobEvaluation(jobId, {
                 deep_limit: 100,
                 include_deep_evaluation: true,
             });
+            setEvaluationMessage(result.message || 'Evaluation queued');
+            setEvaluationProgress(result.progress || buildOptimisticProgress(result, totalSubmissions));
             await refreshEvaluationProgress();
         } catch (error) {
+            setEvaluationMessage('');
             alert(`Failed to queue evaluation: ${error.message}`);
         } finally {
             setQueueingEvaluation(false);
@@ -236,6 +280,20 @@ export default function JobDetail() {
     if (!job) return <div className="p-8 text-center text-gray-500">Job not found.</div>;
 
     const evaluationActive = hasEvaluationActivity(evaluationProgress);
+    const progress = evaluationProgress || {};
+    const visibleEvaluationActive = queueingEvaluation || evaluationActive;
+    const submissionsTotal = Number(progress.submissions_total || 0);
+    const evaluatedCount = Number(progress.evaluated_count || 0);
+    const outcomesTotal = Number(progress.outcomes_total || outcomes.length || 0);
+    const outcomesEvaluated = Number(progress.outcomes_evaluated || 0);
+    const progressPercent = submissionsTotal > 0
+        ? Math.min(100, Math.round((evaluatedCount / submissionsTotal) * 100))
+        : 0;
+    const getProgressStatusCount = (status) => Math.max(
+        Number(progress.submission_status_counts?.[status] || 0),
+        Number(progress.candidate_status_counts?.[status] || 0),
+    );
+    const totalInviteSubmissions = invites.reduce((count, inv) => count + (inv.submissions?.length || 0), 0);
 
     return (
         <div className="max-w-5xl mx-auto space-y-8 pb-12">
@@ -328,6 +386,87 @@ export default function JobDetail() {
                 </div>
             </div>
 
+            <div className={`bg-white border rounded-xl p-5 shadow-sm ${visibleEvaluationActive ? 'border-indigo-200 ring-1 ring-indigo-100' : 'border-gray-200'}`}>
+                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="text-xl font-bold text-gray-900">Evaluation Progress</h2>
+                            {visibleEvaluationActive && (
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 border border-indigo-100">
+                                    <RefreshCw className="w-3 h-3 animate-spin" />
+                                    Processing
+                                </span>
+                            )}
+                            {(progress.queue_backend || queueingEvaluation) && (
+                                <span className="inline-flex items-center rounded-full bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600 border border-gray-200">
+                                    Queue: {progress.queue_backend || 'starting'}
+                                </span>
+                            )}
+                        </div>
+                        <p className="mt-1 text-sm text-gray-500">
+                            {evaluationMessage || `${evaluatedCount} evaluated from ${submissionsTotal || totalInviteSubmissions} submissions`}
+                            {outcomesTotal ? ` - ${outcomesEvaluated}/${outcomesTotal} outcomes ready` : ''}
+                            {progress.queue_size ? ` - queue: ${progress.queue_size}` : ''}
+                        </p>
+                        <div className="mt-4 h-2 rounded-full bg-gray-100 overflow-hidden">
+                            <div
+                                className={`h-full rounded-full transition-all duration-500 ${visibleEvaluationActive ? 'bg-indigo-500' : 'bg-primary'}`}
+                                style={{ width: `${visibleEvaluationActive && progressPercent === 0 ? 8 : progressPercent}%` }}
+                            />
+                        </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={refreshEvaluationProgress}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+                        >
+                            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+                        </button>
+                        <button
+                            onClick={handleQueueEvaluation}
+                            disabled={queueingEvaluation}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
+                        >
+                            {queueingEvaluation ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                            Evaluate Submissions
+                        </button>
+                    </div>
+                </div>
+                <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+                    {['submitted', 'queued', 'evaluating', 'evaluated', 'failed'].map(status => (
+                        <div key={status} className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+                            <div className="text-gray-400 capitalize">{status}</div>
+                            <div className="font-bold text-gray-800">{getProgressStatusCount(status)}</div>
+                        </div>
+                    ))}
+                </div>
+                {progress.top_candidates?.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        {progress.top_candidates.slice(0, 5).map(candidate => (
+                            <span key={candidate.candidate_id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary-soft text-primary-hover text-xs font-semibold">
+                                {candidate.candidate_id}: {Math.round(candidate.score || 0)}%
+                            </span>
+                        ))}
+                    </div>
+                )}
+                {progress.outcome_statuses?.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        {progress.outcome_statuses.map(outcome => (
+                            <span
+                                key={outcome.outcome_id}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                                    outcome.status === 'evaluated'
+                                        ? 'bg-green-50 text-green-700 border border-green-200'
+                                        : 'bg-gray-50 text-gray-600 border border-gray-200'
+                                }`}
+                            >
+                                {outcome.title}: {outcome.status}
+                            </span>
+                        ))}
+                    </div>
+                )}
+            </div>
+
             {/* Outcomes Section */}
             <div id="outcomes" className="space-y-4 scroll-mt-6">
                 <div className="flex justify-between items-center">
@@ -407,85 +546,6 @@ export default function JobDetail() {
                         )}
                     </button>
                 </div>
-
-                {evaluationProgress && (
-                    <div className={`bg-white border rounded-lg p-4 shadow-sm ${evaluationActive ? 'border-indigo-200 ring-1 ring-indigo-100' : 'border-gray-200'}`}>
-                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                            <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <h3 className="font-semibold text-gray-900">Evaluation Progress</h3>
-                                    {evaluationActive && (
-                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 border border-indigo-100">
-                                            <RefreshCw className="w-3 h-3 animate-spin" />
-                                            Processing
-                                        </span>
-                                    )}
-                                    {evaluationProgress.queue_backend && (
-                                        <span className="inline-flex items-center rounded-full bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600 border border-gray-200">
-                                            Queue: {evaluationProgress.queue_backend}
-                                        </span>
-                                    )}
-                                </div>
-                                <p className="text-xs text-gray-500">
-                                    {evaluationProgress.evaluated_count || 0} evaluated from {evaluationProgress.submissions_total || 0} submissions
-                                    {evaluationProgress.outcomes_total ? ` - ${evaluationProgress.outcomes_evaluated || 0}/${evaluationProgress.outcomes_total} outcomes ready` : ''}
-                                    {evaluationProgress.queue_size ? ` - queue: ${evaluationProgress.queue_size}` : ''}
-                                </p>
-                            </div>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={refreshEvaluationProgress}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-200 transition-colors"
-                                >
-                                    <RefreshCw className="w-3.5 h-3.5" /> Refresh
-                                </button>
-                                <button
-                                    onClick={handleQueueEvaluation}
-                                    disabled={queueingEvaluation}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
-                                >
-                                    {queueingEvaluation ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
-                                    Evaluate Submissions
-                                </button>
-                            </div>
-                        </div>
-                        <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-                            {['submitted', 'queued', 'evaluating', 'evaluated', 'failed'].map(status => (
-                                <div key={status} className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
-                                    <div className="text-gray-400 capitalize">{status}</div>
-                                    <div className="font-bold text-gray-800">
-                                        {evaluationProgress.submission_status_counts?.[status] || evaluationProgress.candidate_status_counts?.[status] || 0}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                        {evaluationProgress.top_candidates?.length > 0 && (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                                {evaluationProgress.top_candidates.slice(0, 5).map(candidate => (
-                                    <span key={candidate.candidate_id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary-soft text-primary-hover text-xs font-semibold">
-                                        {candidate.candidate_id}: {Math.round(candidate.score || 0)}%
-                                    </span>
-                                ))}
-                            </div>
-                        )}
-                        {evaluationProgress.outcome_statuses?.length > 0 && (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                                {evaluationProgress.outcome_statuses.map(outcome => (
-                                    <span
-                                        key={outcome.outcome_id}
-                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                                            outcome.status === 'evaluated'
-                                                ? 'bg-green-50 text-green-700 border border-green-200'
-                                                : 'bg-gray-50 text-gray-600 border border-gray-200'
-                                        }`}
-                                    >
-                                        {outcome.title}: {outcome.status}
-                                    </span>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                )}
 
                 {invites.length === 0 ? (
                     <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">

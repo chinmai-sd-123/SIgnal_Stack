@@ -239,6 +239,7 @@ def queue_job_applications_for_evaluation(
             "deep_limit": max(0, deep_limit),
             "include_deep_evaluation": include_deep_evaluation,
             "message": "No submissions need evaluation",
+            "progress": get_job_evaluation_progress(db, job_id),
         }
 
     task_id = queue_job_evaluation(
@@ -255,6 +256,7 @@ def queue_job_applications_for_evaluation(
         "deep_limit": max(0, deep_limit),
         "include_deep_evaluation": include_deep_evaluation,
         "message": "Job evaluation queued",
+        "progress": get_job_evaluation_progress(db, job_id),
     }
 
 

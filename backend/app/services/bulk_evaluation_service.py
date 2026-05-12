@@ -1,6 +1,7 @@
 import logging
 import json
 import threading
+import time
 import uuid
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
@@ -16,6 +17,7 @@ from app.models.proof import Proof
 from app.pipeline.evaluator import Evaluator
 from app.pipeline.scoring_engine import score_candidate
 from app.pipeline.signal_extractor import SignalExtractor
+from app.monitoring import track_evaluation_complete, track_evaluation_start
 from app.services import crud
 from app.services.cache import cache
 from app.services.worker_queue import TaskStatus, worker_queue
@@ -495,6 +497,9 @@ def evaluate_job_applications_sync(
     include_deep_evaluation: bool = True,
 ) -> Dict[str, Any]:
     """Screen all submissions for a job, then deep-evaluate only the top N."""
+    started_at = time.perf_counter()
+    track_evaluation_start()
+    success = False
     db = SessionLocal()
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
@@ -542,6 +547,7 @@ def evaluate_job_applications_sync(
                 signals_by_candidate,
             )
 
+        success = True
         return {
             "job_id": job_id,
             "screened": len(screened),
@@ -551,6 +557,7 @@ def evaluate_job_applications_sync(
             "evaluations_created": evaluations_created,
         }
     finally:
+        track_evaluation_complete(time.perf_counter() - started_at, success=success)
         db.close()
 
 
