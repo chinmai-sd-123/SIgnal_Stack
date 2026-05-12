@@ -176,6 +176,24 @@ def _count_redis_job_queue_items(job_id: Optional[str]) -> int:
     return count
 
 
+def ensure_redis_job_evaluation_worker_for_pending(job_id: Optional[str] = None) -> bool:
+    """
+    Wake the Redis worker when pending/processing job work exists.
+
+    Render/Vercel-style deploys can restart the Python process while Redis still
+    contains queued work. Progress polling must be able to revive the in-process
+    worker; otherwise the UI can show queue: 1 forever with no evaluator active.
+    """
+    if not _redis_available():
+        return False
+    try:
+        if _count_redis_job_queue_items(job_id) > 0:
+            return init_redis_job_evaluation_worker()
+    except Exception as exc:
+        logger.warning("Could not wake Redis evaluation worker: %s", exc)
+    return False
+
+
 def _count_memory_job_queue_items(job_id: Optional[str]) -> int:
     if not job_id:
         return worker_queue.get_queue_size()
@@ -759,6 +777,7 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
         if not current or (item.created_at or utc_now()) > (current.created_at or utc_now()):
             latest_evaluation_by_outcome[item.outcome_id] = item
 
+    ensure_redis_job_evaluation_worker_for_pending(job_id)
     job_queue_size = get_job_evaluation_queue_size(job_id)
 
     outcome_statuses = []

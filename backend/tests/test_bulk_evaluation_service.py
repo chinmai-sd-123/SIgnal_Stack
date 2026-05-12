@@ -360,6 +360,22 @@ def test_job_evaluation_queue_size_is_scoped_to_job(monkeypatch):
 
 
 @pytest.mark.unit
+def test_pending_redis_job_queue_wakes_worker(monkeypatch):
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(bulk.cache, "redis_client", fake_redis)
+    starts = []
+    monkeypatch.setattr(bulk, "init_redis_job_evaluation_worker", lambda: starts.append(True) or True)
+
+    assert bulk.ensure_redis_job_evaluation_worker_for_pending("missing-job") is False
+    assert starts == []
+
+    fake_redis.lpush(bulk.REDIS_JOB_EVAL_QUEUE, '{"task_id":"task-1","job_id":"job-1"}')
+
+    assert bulk.ensure_redis_job_evaluation_worker_for_pending("job-1") is True
+    assert starts == [True]
+
+
+@pytest.mark.unit
 def test_queued_only_progress_can_be_reenqueued():
     progress = {
         "queue_active": False,
