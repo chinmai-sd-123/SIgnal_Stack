@@ -530,6 +530,109 @@ def test_deep_evaluation_plan_includes_all_previously_evaluated_candidates():
     assert signals["new"] == {"commit_count": 1}
 
 
+@pytest.mark.unit
+def test_incremental_report_merge_adds_missing_candidate_and_reranks_task():
+    existing = schemas.EvaluationResponse(
+        job_id="outcome-1",
+        job_title="Build AI systems",
+        fit_score=0.55,
+        capability_score=0.55,
+        evidence_confidence=0.6,
+        production_readiness=0.4,
+        verification_status="verified",
+        work_allocation=[
+            schemas.WorkAllocation(
+                task_id="task-1",
+                task_title="Build RAG workflow",
+                recommended_candidate="old@example.com",
+                confidence=0.55,
+                reasons=["Old candidate was best"],
+                evidence=[],
+                top_candidates=[
+                    schemas.CandidateScore(
+                        candidate_id="old@example.com",
+                        score=0.55,
+                        justification="Old evidence",
+                        evidence=[],
+                    )
+                ],
+            )
+        ],
+        global_signals_used=["tests_present"],
+        risk_flags=[],
+        human_action_required=True,
+        candidate_summaries=[
+            schemas.CandidateSummary(
+                candidate_id="old@example.com",
+                overall_score=0.55,
+                capability_score=0.55,
+                evidence_confidence=0.6,
+                production_readiness=0.4,
+                verification_status="verified",
+                tasks_won=1,
+                confidence_rating="Medium",
+                risk_flags=[],
+            )
+        ],
+    )
+    delta = schemas.EvaluationResponse(
+        job_id="outcome-1",
+        job_title="Build AI systems",
+        fit_score=0.72,
+        capability_score=0.72,
+        evidence_confidence=0.7,
+        production_readiness=0.5,
+        verification_status="verified",
+        work_allocation=[
+            schemas.WorkAllocation(
+                task_id="task-1",
+                task_title="Build RAG workflow",
+                recommended_candidate="new@example.com",
+                confidence=0.72,
+                reasons=["New candidate is stronger"],
+                evidence=[],
+                top_candidates=[
+                    schemas.CandidateScore(
+                        candidate_id="new@example.com",
+                        score=0.72,
+                        justification="New evidence",
+                        evidence=[],
+                    )
+                ],
+            )
+        ],
+        global_signals_used=["readme_quality_score"],
+        risk_flags=[],
+        human_action_required=True,
+        candidate_summaries=[
+            schemas.CandidateSummary(
+                candidate_id="new@example.com",
+                overall_score=0.72,
+                capability_score=0.72,
+                evidence_confidence=0.7,
+                production_readiness=0.5,
+                verification_status="verified",
+                tasks_won=1,
+                confidence_rating="High",
+                risk_flags=[],
+            )
+        ],
+    )
+
+    merged = bulk._merge_evaluation_response(existing, delta)
+
+    assert [item.candidate_id for item in merged.candidate_summaries] == [
+        "new@example.com",
+        "old@example.com",
+    ]
+    assert merged.work_allocation[0].recommended_candidate == "new@example.com"
+    assert [item.candidate_id for item in merged.work_allocation[0].top_candidates] == [
+        "new@example.com",
+        "old@example.com",
+    ]
+    assert merged.global_signals_used == ["readme_quality_score", "tests_present"]
+
+
 @pytest.mark.integration
 def test_staged_job_evaluation_refreshes_reports_with_later_candidates(db_session, monkeypatch):
     job_id = "job-staged-eval"

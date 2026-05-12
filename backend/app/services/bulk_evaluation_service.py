@@ -453,6 +453,134 @@ def _candidate_ids_for_deep_evaluation(
     return [candidate.candidate_id for candidate in evaluated_candidates]
 
 
+def _average_summary_dimensions(candidate_summaries: List[schemas.CandidateSummary]) -> Optional[Dict[str, float]]:
+    totals: Dict[str, float] = {}
+    count = 0
+    for summary in candidate_summaries:
+        if not summary.dimensions:
+            continue
+        count += 1
+        for key, value in summary.dimensions.items():
+            try:
+                totals[key] = totals.get(key, 0.0) + float(value or 0.0)
+            except (TypeError, ValueError):
+                totals[key] = totals.get(key, 0.0)
+    if count <= 0:
+        return None
+    return {key: round(value / count, 2) for key, value in totals.items()}
+
+
+def _latest_evaluation_for_outcome(db, outcome_id: str) -> Optional[Evaluation]:
+    return db.query(Evaluation).filter(
+        Evaluation.outcome_id == outcome_id,
+        Evaluation.status == "completed",
+    ).order_by(Evaluation.created_at.desc()).first()
+
+
+def _evaluation_from_payload(payload: Dict[str, Any]) -> Optional[schemas.EvaluationResponse]:
+    if not payload:
+        return None
+    try:
+        return schemas.EvaluationResponse.model_validate(payload)
+    except Exception as exc:
+        logger.warning("Could not parse existing evaluation payload for incremental merge: %s", exc)
+        return None
+
+
+def _merge_candidate_summaries(
+    existing: List[schemas.CandidateSummary],
+    delta: List[schemas.CandidateSummary],
+) -> List[schemas.CandidateSummary]:
+    by_candidate = {item.candidate_id: item for item in existing}
+    for item in delta:
+        by_candidate[item.candidate_id] = item
+
+    merged = list(by_candidate.values())
+    merged.sort(key=lambda item: item.overall_score or 0.0, reverse=True)
+    return merged
+
+
+def _merge_allocation(
+    existing: schemas.WorkAllocation,
+    delta: Optional[schemas.WorkAllocation],
+) -> schemas.WorkAllocation:
+    if not delta:
+        return existing
+
+    scores = {item.candidate_id: item for item in existing.top_candidates or []}
+    for item in delta.top_candidates or []:
+        scores[item.candidate_id] = item
+
+    ranked_scores = sorted(scores.values(), key=lambda item: item.score or 0.0, reverse=True)
+    best = ranked_scores[0] if ranked_scores else None
+
+    return schemas.WorkAllocation(
+        task_id=existing.task_id,
+        task_title=existing.task_title,
+        recommended_candidate=best.candidate_id if best else "None",
+        confidence=round(best.score, 2) if best else 0.0,
+        reasons=[best.justification] if best and best.justification else existing.reasons,
+        evidence=best.evidence if best and best.evidence else existing.evidence,
+        top_candidates=ranked_scores,
+    )
+
+
+def _merge_evaluation_response(
+    existing: schemas.EvaluationResponse,
+    delta: schemas.EvaluationResponse,
+) -> schemas.EvaluationResponse:
+    delta_by_task = {
+        allocation.task_id or allocation.task_title: allocation
+        for allocation in delta.work_allocation or []
+    }
+    merged_allocations = [
+        _merge_allocation(
+            allocation,
+            delta_by_task.get(allocation.task_id or allocation.task_title),
+        )
+        for allocation in existing.work_allocation or []
+    ]
+
+    existing_keys = {allocation.task_id or allocation.task_title for allocation in existing.work_allocation or []}
+    for allocation in delta.work_allocation or []:
+        key = allocation.task_id or allocation.task_title
+        if key not in existing_keys:
+            merged_allocations.append(allocation)
+
+    merged_summaries = _merge_candidate_summaries(
+        list(existing.candidate_summaries or []),
+        list(delta.candidate_summaries or []),
+    )
+
+    wins = defaultdict(int)
+    for allocation in merged_allocations:
+        if allocation.recommended_candidate and allocation.recommended_candidate != "None":
+            wins[allocation.recommended_candidate] += 1
+
+    for summary in merged_summaries:
+        summary.tasks_won = wins.get(summary.candidate_id, 0)
+
+    top_summary = merged_summaries[0] if merged_summaries else None
+    global_signals_used = sorted(set(existing.global_signals_used or []) | set(delta.global_signals_used or []))
+    risk_flags = sorted(set((top_summary.risk_flags if top_summary else []) or []))
+
+    return schemas.EvaluationResponse(
+        job_id=existing.job_id,
+        job_title=existing.job_title or delta.job_title,
+        fit_score=round(top_summary.overall_score, 2) if top_summary else 0.0,
+        capability_score=top_summary.capability_score if top_summary else None,
+        evidence_confidence=top_summary.evidence_confidence if top_summary else None,
+        production_readiness=top_summary.production_readiness if top_summary else None,
+        verification_status=top_summary.verification_status if top_summary else "unverified",
+        work_allocation=merged_allocations,
+        global_signals_used=global_signals_used,
+        risk_flags=risk_flags,
+        human_action_required=True,
+        dimensions=_average_summary_dimensions(merged_summaries),
+        candidate_summaries=merged_summaries,
+    )
+
+
 def _mark_failure(db, candidate: JobCandidate, submission: Optional[InviteSubmission], error: str):
     candidate.status = "failed"
     candidate.evaluation_data = {
@@ -586,9 +714,27 @@ def _deep_evaluate_top_candidates(
     evaluations_created = 0
 
     for outcome in outcomes:
+        latest = _latest_evaluation_for_outcome(db, outcome.id)
+        existing_response = _evaluation_from_payload(latest.evaluation_json) if latest else None
+        existing_candidate_ids = {
+            item.candidate_id
+            for item in (existing_response.candidate_summaries if existing_response else [])
+            if item.candidate_id
+        }
+        expected_candidate_ids = set(candidate_ids)
+        missing_candidate_ids = expected_candidate_ids - existing_candidate_ids
+        candidate_ids_to_evaluate = (
+            [candidate_id for candidate_id in candidate_ids if candidate_id in missing_candidate_ids]
+            if existing_response
+            else list(candidate_ids)
+        )
+
+        if existing_response and not candidate_ids_to_evaluate:
+            continue
+
         proofs = db.query(Proof).filter(
             Proof.outcome_id == outcome.id,
-            Proof.candidate_id.in_(candidate_ids),
+            Proof.candidate_id.in_(candidate_ids_to_evaluate),
         ).all()
         if not proofs:
             continue
@@ -601,9 +747,15 @@ def _deep_evaluate_top_candidates(
         }
 
         if hasattr(evaluator, "evaluate_batched"):
-            evaluation = evaluator.evaluate_batched(outcome_schema, proof_schemas, signals_map)
+            delta_evaluation = evaluator.evaluate_batched(outcome_schema, proof_schemas, signals_map)
         else:
-            evaluation = evaluator.evaluate(outcome_schema, proof_schemas, signals_map)
+            delta_evaluation = evaluator.evaluate(outcome_schema, proof_schemas, signals_map)
+
+        evaluation = (
+            _merge_evaluation_response(existing_response, delta_evaluation)
+            if existing_response
+            else delta_evaluation
+        )
         crud.create_evaluation(db, evaluation)
         evaluations_created += 1
 

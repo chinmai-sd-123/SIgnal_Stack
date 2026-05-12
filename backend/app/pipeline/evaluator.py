@@ -317,7 +317,7 @@ class Evaluator:
                     justification=cs['justification'],
                     evidence=cs.get('evidence') or []
                 )
-                for cs in task_candidate_scores[:5]  # Top 5 candidates per task
+                for cs in task_candidate_scores
             ]
             
             # Create allocation for this task with best candidate
@@ -597,7 +597,7 @@ class Evaluator:
                     justification=item["justification"],
                     evidence=item.get("evidence") or [],
                 )
-                for item in scores[:5]
+                for item in scores
             ]
 
             alloc = self.allocator.create_allocation(

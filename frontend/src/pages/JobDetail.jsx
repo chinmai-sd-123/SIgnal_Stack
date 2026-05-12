@@ -321,6 +321,7 @@ export default function JobDetail() {
     const evaluatedCount = Number(progress.evaluated_count || 0);
     const outcomesTotal = Number(progress.outcomes_total || outcomes.length || 0);
     const outcomesEvaluated = Number(progress.outcomes_evaluated || 0);
+    const totalInviteSubmissions = invites.reduce((count, inv) => count + (inv.submissions?.length || 0), 0);
     const deepReportLimit = 25;
     const highVolumeMode = (submissionsTotal || totalInviteSubmissions) > deepReportLimit;
     const progressPercent = submissionsTotal > 0
@@ -333,7 +334,6 @@ export default function JobDetail() {
     const getOutcomeReportStatus = (outcomeId) => (
         progress.outcome_statuses?.find((item) => item.outcome_id === outcomeId)
     );
-    const totalInviteSubmissions = invites.reduce((count, inv) => count + (inv.submissions?.length || 0), 0);
     const partialReportCount = (progress.outcome_statuses || []).filter(
         item => item.status === 'stale' && Number(item.report_candidate_count || 0) > 0
     ).length;
