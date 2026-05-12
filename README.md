@@ -137,8 +137,10 @@ SignalStack supports high-volume candidate evaluation through a background queue
 | User navigates away | Backend processing continues; returning to the job page refreshes live progress. |
 | Redis configured | Redis-backed queue survives process restarts better than memory-only queue. |
 | Redis unavailable | System falls back to in-memory queue and cache for local development. |
+| New candidate after an earlier evaluation | Only missing/stale report candidates are refreshed and merged into the latest outcome report. Existing evaluated candidates remain visible while the full report catches up. |
 
 The frontend shows job-scoped queue progress, not global queue noise from another job.
+For small and medium batches, the job progress card lists every evaluated candidate returned by the backend instead of hiding candidates behind a fixed five-person preview.
 
 ---
 

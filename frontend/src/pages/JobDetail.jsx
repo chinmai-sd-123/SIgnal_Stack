@@ -515,7 +515,7 @@ export default function JobDetail() {
                 </div>
                 {progress.top_candidates?.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
-                        {progress.top_candidates.slice(0, 5).map(candidate => (
+                        {progress.top_candidates.map(candidate => (
                             <span key={candidate.candidate_id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary-soft text-primary-hover text-xs font-semibold">
                                 {candidate.candidate_name || candidate.candidate_email || candidate.candidate_id}: {Math.round(candidate.score || 0)}%
                             </span>
