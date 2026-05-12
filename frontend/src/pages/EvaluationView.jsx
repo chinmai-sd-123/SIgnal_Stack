@@ -448,48 +448,52 @@ export default function EvaluationView() {
                             {fallbackSummaries.map((candidate, idx) => (
                                 <div
                                     key={candidate.candidate_id}
-                                    className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-primary transition-all overflow-hidden flex flex-col"
+                                    className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-primary transition-all overflow-hidden flex flex-col min-h-[336px]"
                                 >
                                     {/* Rank Badge */}
                                     {idx < 3 && (
                                         <div className={`h-1 ${idx === 0 ? 'bg-accent' : idx === 1 ? 'bg-gray-300' : 'bg-primary'}`}></div>
                                     )}
 
-                                    <div className="p-6 flex-1">
-                                        <div className="flex items-start justify-between mb-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-12 h-12 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center text-white text-lg font-bold shadow-sm">
-                                                    {candidate.candidate_id.charAt(0).toUpperCase()}
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-bold text-gray-900 truncate max-w-[120px]" title={candidate.candidate_id}>{candidate.candidate_id}</h3>
-                                                    <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium border ${getConfidenceBadge(candidate.confidence_rating)}`}>
+                                    <div className="p-6 flex flex-1 flex-col">
+                                        <div className="grid grid-cols-[48px_minmax(0,1fr)_auto] items-start gap-3 mb-5">
+                                            <div className="w-12 h-12 bg-gradient-to-br from-primary to-accent rounded-xl flex items-center justify-center text-white text-lg font-bold shadow-sm">
+                                                {candidate.candidate_id.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <h3 className="font-bold leading-tight text-gray-900 truncate" title={candidate.candidate_id}>
+                                                    {candidate.candidate_id}
+                                                </h3>
+                                                <div className="mt-2 flex min-h-[48px] flex-wrap content-start gap-1.5">
+                                                    <span className={`inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium border ${getConfidenceBadge(candidate.confidence_rating)}`}>
                                                         {candidate.confidence_rating}
                                                     </span>
-                                                    <span className={`inline-block mt-1 ml-1 px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${getVerificationBadge(candidate.verification_status)}`}>
+                                                    <span className={`inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium border capitalize ${getVerificationBadge(candidate.verification_status)}`}>
                                                         {formatStatus(candidate.verification_status)}
                                                     </span>
                                                 </div>
                                             </div>
-                                            <span className={`text-2xl font-bold ${getScoreColor(candidate.overall_score)}`}>
+                                            <span className={`shrink-0 text-right text-2xl font-bold leading-none tabular-nums ${getScoreColor(candidate.overall_score)}`}>
                                                 {Math.round(candidate.overall_score * 100)}%
                                             </span>
                                         </div>
 
                                         <div className="text-sm text-gray-600 mb-6">
-                                            <span className="font-semibold text-gray-900">{candidate.tasks_won}</span> tasks passed
-                                            <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                                                <div className="rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5">
-                                                    <div className="text-gray-400">Capability</div>
-                                                    <div className="font-semibold text-gray-800">{Math.round((candidate.capability_score ?? candidate.overall_score) * 100)}%</div>
+                                            <div className="mb-3 min-h-[22px]">
+                                                <span className="font-semibold text-gray-900">{candidate.tasks_won}</span> tasks passed
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-2 text-xs">
+                                                <div className="min-w-0 rounded-lg bg-gray-50 border border-gray-100 px-2 py-2">
+                                                    <div className="truncate text-gray-400">Capability</div>
+                                                    <div className="font-semibold text-gray-800 tabular-nums">{Math.round((candidate.capability_score ?? candidate.overall_score) * 100)}%</div>
                                                 </div>
-                                                <div className="rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5">
-                                                    <div className="text-gray-400">Evidence</div>
-                                                    <div className="font-semibold text-gray-800">{candidate.evidence_confidence != null ? `${Math.round(candidate.evidence_confidence * 100)}%` : 'N/A'}</div>
+                                                <div className="min-w-0 rounded-lg bg-gray-50 border border-gray-100 px-2 py-2">
+                                                    <div className="truncate text-gray-400">Evidence</div>
+                                                    <div className="font-semibold text-gray-800 tabular-nums">{candidate.evidence_confidence != null ? `${Math.round(candidate.evidence_confidence * 100)}%` : 'N/A'}</div>
                                                 </div>
-                                                <div className="rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5">
-                                                    <div className="text-gray-400">Production</div>
-                                                    <div className="font-semibold text-gray-800">{candidate.production_readiness != null ? `${Math.round(candidate.production_readiness * 100)}%` : 'N/A'}</div>
+                                                <div className="min-w-0 rounded-lg bg-gray-50 border border-gray-100 px-2 py-2">
+                                                    <div className="truncate text-gray-400">Production</div>
+                                                    <div className="font-semibold text-gray-800 tabular-nums">{candidate.production_readiness != null ? `${Math.round(candidate.production_readiness * 100)}%` : 'N/A'}</div>
                                                 </div>
                                             </div>
                                         </div>
