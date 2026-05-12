@@ -553,42 +553,6 @@ Recommended pre-merge checklist:
 
 ---
 
-## Production Notes
-
-### Data
-
-- Use PostgreSQL for production.
-- Use a separate test database for integration tests.
-- Do not rely on SQLite for production hiring data.
-
-### Queueing
-
-- Configure Redis for durable background evaluation.
-- Memory queue is acceptable for local development only.
-- Monitor queue size and stuck `evaluating` states.
-
-### Secrets
-
-- Never commit `.env`.
-- Rotate any credential pasted into chat, logs, screenshots, or issue trackers.
-- Use managed secrets in deployment environments.
-
-### AI Reliability
-
-- Keep scoring and evidence grounding deterministic where possible.
-- Treat LLM output as assessment text, not ground truth.
-- Keep evidence snippets visible to recruiters.
-- Cap scores when evidence is missing.
-
-### Candidate Fairness
-
-- Do not over-penalize personal projects for missing CI/CD or deployment.
-- Report authorship verification separately from implementation quality.
-- Prefer direct project evidence over resume claims.
-- Surface uncertainty instead of hiding it.
-
----
-
 ## Design Principles
 
 SignalStack is built around five product principles:
