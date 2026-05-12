@@ -26,6 +26,16 @@ from app.services.submission_proof_service import sync_job_invite_proofs
 router = APIRouter()
 
 
+def _report_refresh_needed(progress: dict) -> bool:
+    evaluated_count = int(progress.get("evaluated_count") or 0)
+    if evaluated_count <= 0:
+        return False
+    for outcome in progress.get("outcome_statuses") or []:
+        if int(outcome.get("report_candidate_count") or 0) < evaluated_count:
+            return True
+    return False
+
+
 def _ensure_job_recruiter_column(db: Session):
     columns = {column["name"] for column in inspect(db.bind).get_columns("jobs")}
     if "recruiter_id" not in columns:
@@ -289,13 +299,33 @@ def queue_job_applications_for_evaluation(
             retry_failed_only=retry_failed_only,
         )
         progress = get_job_evaluation_progress(db, job_id)
+        report_refresh_needed = include_deep_evaluation and _report_refresh_needed(progress)
+        follow_up_task_id = None
+        if queued_count > 0 or report_refresh_needed:
+            follow_up_task_id = queue_job_evaluation(
+                job_id,
+                deep_limit=max(0, deep_limit),
+                candidate_limit=int(candidate_limit) if candidate_limit else None,
+                include_deep_evaluation=include_deep_evaluation,
+            )
+            crud.create_audit_log(db, "job_evaluation", job_id, "follow_up_queued", {
+                "task_id": follow_up_task_id,
+                "queued_count": queued_count,
+                "report_refresh_needed": report_refresh_needed,
+                "deep_limit": max(0, deep_limit),
+                "include_deep_evaluation": include_deep_evaluation,
+            })
         return {
             "job_id": job_id,
-            "task_id": None,
+            "task_id": follow_up_task_id,
             "queued_count": queued_count,
             "deep_limit": max(0, deep_limit),
             "include_deep_evaluation": include_deep_evaluation,
-            "message": "Job evaluation is already queued or running; new submissions were added to the active job queue",
+            "message": (
+                "Evaluation follow-up queued to refresh reports"
+                if follow_up_task_id
+                else "Job evaluation is already queued or running"
+            ),
             "progress": progress,
         }
 
@@ -306,7 +336,8 @@ def queue_job_applications_for_evaluation(
         retry_failed_only=retry_failed_only,
     )
 
-    if queued_count == 0 and (not include_deep_evaluation or progress.get("evaluated_count", 0) == 0):
+    report_refresh_needed = include_deep_evaluation and _report_refresh_needed(progress)
+    if queued_count == 0 and not report_refresh_needed and (not include_deep_evaluation or progress.get("evaluated_count", 0) == 0):
         crud.create_audit_log(db, "job_evaluation", job_id, "queue_skipped", {
             "reason": "No submissions need evaluation",
             "deep_limit": max(0, deep_limit),
