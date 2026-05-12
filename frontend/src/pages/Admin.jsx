@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Settings, History, FileText, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, Activity } from 'lucide-react';
+import { apiFetch } from '../api';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const fetchJson = async (path) => {
-    const response = await fetch(`${API_BASE}${path}`, {
+    const response = await apiFetch(path, {
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache' },
     });

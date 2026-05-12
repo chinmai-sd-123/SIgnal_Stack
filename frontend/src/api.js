@@ -1,7 +1,53 @@
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+export const getAuthToken = () => localStorage.getItem('authToken') || '';
+
+export const authHeaders = (headers = {}) => {
+    const token = getAuthToken();
+    return {
+        ...headers,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+};
+
+export async function apiFetch(path, options = {}) {
+    const response = await fetch(`${API_URL}${path}`, {
+        ...options,
+        headers: authHeaders(options.headers || {}),
+    });
+    if (response.status === 401) {
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('recruiterId');
+        localStorage.removeItem('recruiterName');
+        localStorage.removeItem('recruiterRole');
+        if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/apply')) {
+            window.location.href = '/login';
+        }
+    }
+    return response;
+}
+
+export async function recruiterLogin(payload) {
+    const response = await apiFetch(`/recruiter/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Invalid credentials");
+    }
+    return response.json();
+}
+
+export async function getCurrentRecruiter() {
+    const response = await apiFetch('/recruiter/me');
+    if (!response.ok) throw new Error("Failed to fetch recruiter");
+    return response.json();
+}
+
 export async function createOutcome(outcome) {
-    const response = await fetch(`${API_URL}/outcomes`, {
+    const response = await apiFetch(`/outcomes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(outcome),
@@ -15,7 +61,7 @@ export async function createOutcome(outcome) {
 
 // === JOB API ===
 export async function createJob(job) {
-    const response = await fetch(`${API_URL}/jobs`, {
+    const response = await apiFetch(`/jobs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(job),
@@ -28,7 +74,7 @@ export async function createJob(job) {
 }
 
 export async function updateJobStatus(jobId, status) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/status`, {
+    const response = await apiFetch(`/jobs/${jobId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status })
@@ -46,7 +92,7 @@ export async function updateJobStatus(jobId, status) {
 
 // Update candidate status (shortlisted/rejected)
 export async function updateCandidateStatus(jobId, candidateId, status) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/candidates/${candidateId}/status`, {
+    const response = await apiFetch(`/jobs/${jobId}/candidates/${candidateId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status })  // "shortlisted" | "rejected"
@@ -62,13 +108,13 @@ export async function updateCandidateStatus(jobId, candidateId, status) {
 
 // Shortlist management
 export async function getShortlist(jobId, autoSelect = false) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/shortlist?auto_select=${autoSelect}`);
+    const response = await apiFetch(`/jobs/${jobId}/shortlist?auto_select=${autoSelect}`);
     if (!response.ok) throw new Error('Failed to get shortlist');
     return response.json();
 }
 
 export async function updateShortlist(jobId, candidateIds) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/shortlist`, {
+    const response = await apiFetch(`/jobs/${jobId}/shortlist`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ candidate_ids: candidateIds })
@@ -78,7 +124,7 @@ export async function updateShortlist(jobId, candidateIds) {
 }
 
 export async function finalizeShortlist(jobId) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/finalize-shortlist`, {
+    const response = await apiFetch(`/jobs/${jobId}/finalize-shortlist`, {
         method: 'POST'
     });
     if (!response.ok) {
@@ -89,7 +135,7 @@ export async function finalizeShortlist(jobId) {
 }
 
 export async function archiveJob(jobId) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/archive`, {
+    const response = await apiFetch(`/jobs/${jobId}/archive`, {
         method: 'PATCH'
     });
     if (!response.ok) {
@@ -101,25 +147,25 @@ export async function archiveJob(jobId) {
 
 export async function getJobs() {
     // Fetch all jobs including archived, we'll filter on client side
-    const response = await fetch(`${API_URL}/jobs?include_archived=true`);
+    const response = await apiFetch(`/jobs?include_archived=true`);
     if (!response.ok) throw new Error("Failed to fetch jobs");
     return response.json();
 }
 
 export async function getJob(jobId) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}`);
+    const response = await apiFetch(`/jobs/${jobId}`);
     if (!response.ok) throw new Error("Failed to fetch job");
     return response.json();
 }
 
 export async function getJobOutcomes(jobId) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/outcomes`);
+    const response = await apiFetch(`/jobs/${jobId}/outcomes`);
     if (!response.ok) throw new Error("Failed to fetch job outcomes");
     return response.json();
 }
 
 export async function updateOutcome(outcomeId, outcome) {
-    const response = await fetch(`${API_URL}/outcomes/${outcomeId}`, {
+    const response = await apiFetch(`/outcomes/${outcomeId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(outcome),
@@ -132,7 +178,7 @@ export async function updateOutcome(outcomeId, outcome) {
 }
 
 export async function deleteOutcome(outcomeId) {
-    const response = await fetch(`${API_URL}/outcomes/${outcomeId}`, {
+    const response = await apiFetch(`/outcomes/${outcomeId}`, {
         method: "DELETE",
     });
     if (!response.ok) {
@@ -143,7 +189,7 @@ export async function deleteOutcome(outcomeId) {
 }
 
 export async function queueJobEvaluation(jobId, options = {}) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/evaluations/queue`, {
+    const response = await apiFetch(`/jobs/${jobId}/evaluations/queue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(options),
@@ -156,7 +202,7 @@ export async function queueJobEvaluation(jobId, options = {}) {
 }
 
 export async function getJobEvaluationProgress(jobId) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/evaluations/progress`, {
+    const response = await apiFetch(`/jobs/${jobId}/evaluations/progress`, {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" },
     });
@@ -166,7 +212,7 @@ export async function getJobEvaluationProgress(jobId) {
 
 // === OUTCOME API ===
 export async function getOutcome(outcomeId) {
-    const response = await fetch(`${API_URL}/outcomes/${outcomeId}`);
+    const response = await apiFetch(`/outcomes/${outcomeId}`);
     if (!response.ok) throw new Error("Failed to fetch outcome");
     return response.json();
 }
@@ -177,23 +223,23 @@ export async function getOutcomes() {
     // For MVP demo, we can just return a list if we had one, or fetch known ones.
     // Since we don't have a list endpoint, we'll mock it or add it to backend.
     // Let's add it to backend for correctness.
-    const response = await fetch(`${API_URL}/outcomes`);
+    const response = await apiFetch(`/outcomes`);
     if (!response.ok) return []; // Return empty if endpoint missing
     return response.json();
 }
 
 export async function getOutcomeTemplates(categorySlug = null) {
     const url = categorySlug
-        ? `${API_URL}/outcome-templates?category_slug=${categorySlug}`
-        : `${API_URL}/outcome-templates`;
-    const response = await fetch(url);
+        ? `/outcome-templates?category_slug=${categorySlug}`
+        : `/outcome-templates`;
+    const response = await apiFetch(url);
     if (!response.ok) return [];
     return response.json();
 }
 
 export async function deleteJob(jobId, hardDelete = false) {
-    const url = `${API_URL}/jobs/${jobId}${hardDelete ? '?hard_delete=true' : ''}`;
-    const response = await fetch(url, {
+    const url = `/jobs/${jobId}${hardDelete ? '?hard_delete=true' : ''}`;
+    const response = await apiFetch(url, {
         method: 'DELETE',
     });
     if (!response.ok) {
@@ -204,7 +250,7 @@ export async function deleteJob(jobId, hardDelete = false) {
 }
 
 export async function submitProof(proof) {
-    const response = await fetch(`${API_URL}/proofs`, {
+    const response = await apiFetch(`/proofs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(proof),
@@ -214,7 +260,7 @@ export async function submitProof(proof) {
 }
 
 export async function submitFeedback(feedback) {
-    const response = await fetch(`${API_URL}/plugin/feedback`, {
+    const response = await apiFetch(`/plugin/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(feedback),
@@ -223,7 +269,7 @@ export async function submitFeedback(feedback) {
 }
 
 export async function submitTaskFeedback(feedback) {
-    const response = await fetch(`${API_URL}/feedback/task-weight`, {
+    const response = await apiFetch(`/feedback/task-weight`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(feedback),
@@ -236,30 +282,30 @@ export async function submitTaskFeedback(feedback) {
 }
 
 export async function getSignalWeights() {
-    const response = await fetch(`${API_URL}/admin/signal-weights`);
+    const response = await apiFetch(`/admin/signal-weights`);
     return response.json();
 }
 
 export async function getWeightHistory(limit = 100) {
-    const response = await fetch(`${API_URL}/admin/weight-history?limit=${limit}`);
+    const response = await apiFetch(`/admin/weight-history?limit=${limit}`);
     if (!response.ok) throw new Error("Failed to fetch weight history");
     return response.json();
 }
 
 export async function getTaskWeightHistory(limit = 100) {
-    const response = await fetch(`${API_URL}/admin/task-weight-history?limit=${limit}`);
+    const response = await apiFetch(`/admin/task-weight-history?limit=${limit}`);
     if (!response.ok) throw new Error("Failed to fetch task weight history");
     return response.json();
 }
 
 export async function getLlmLogs() {
-    const response = await fetch(`${API_URL}/admin/llm-logs`);
+    const response = await apiFetch(`/admin/llm-logs`);
     if (!response.ok) throw new Error("Failed to fetch LLM logs");
     return response.json();
 }
 
 export async function resetDecision(jobId) {
-    const response = await fetch(`${API_URL}/feedback/reset/${jobId}`, {
+    const response = await apiFetch(`/feedback/reset/${jobId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
     });
@@ -271,7 +317,7 @@ export async function resetDecision(jobId) {
 }
 
 export async function getEvaluations() {
-    const response = await fetch(`${API_URL}/evaluations`, {
+    const response = await apiFetch(`/evaluations`, {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" },
     });
@@ -280,13 +326,13 @@ export async function getEvaluations() {
 }
 
 export async function getProofs(outcomeId) {
-    const response = await fetch(`${API_URL}/proofs/${outcomeId}`);
+    const response = await apiFetch(`/proofs/${outcomeId}`);
     if (!response.ok) throw new Error("Failed to fetch proofs");
     return response.json();
 }
 
 export async function triggerEvaluation(payload) {
-    const response = await fetch(`${API_URL}/plugin/evaluate`, {
+    const response = await apiFetch(`/plugin/evaluate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -296,7 +342,7 @@ export async function triggerEvaluation(payload) {
 }
 
 export async function getEvaluation(jobId) {
-    const response = await fetch(`${API_URL}/plugin/status/${jobId}`, {
+    const response = await apiFetch(`/plugin/status/${jobId}`, {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" },
     });
@@ -307,7 +353,7 @@ export async function getEvaluation(jobId) {
 }
 
 export const suggestTasks = async (description) => {
-    const response = await fetch(`${API_URL}/plugin/suggest-tasks`, {
+    const response = await apiFetch(`/plugin/suggest-tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description })
@@ -317,25 +363,25 @@ export const suggestTasks = async (description) => {
 };
 
 export const getRepoPreview = async (repoUrl) => {
-    const response = await fetch(`${API_URL}/plugin/repo-preview?repo_url=${encodeURIComponent(repoUrl)}`);
+    const response = await apiFetch(`/plugin/repo-preview?repo_url=${encodeURIComponent(repoUrl)}`);
     if (!response.ok) throw new Error('Failed to fetch repo preview');
     return response.json();
 };
 
 export const getLeetCodeStats = async (username) => {
-    const response = await fetch(`${API_URL}/plugin/leetcode/${encodeURIComponent(username.trim())}`);
+    const response = await apiFetch(`/plugin/leetcode/${encodeURIComponent(username.trim())}`);
     if (!response.ok) throw new Error('Failed to fetch leetcode stats');
     return response.json();
 };
 
 export async function getAuditLogs() {
-    const response = await fetch(`${API_URL}/admin/audit-logs`);
+    const response = await apiFetch(`/admin/audit-logs`);
     if (!response.ok) throw new Error("Failed to fetch audit logs");
     return response.json();
 }
 
 export async function getGithubRepos(username, jobId, maxRepos = 50) {
-    const response = await fetch(`${API_URL}/plugin/github/repos/select`, {
+    const response = await apiFetch(`/plugin/github/repos/select`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ github_username: username, job_id: jobId, max_repos: maxRepos })
@@ -376,7 +422,7 @@ export async function getGithubRepos(username, jobId, maxRepos = 50) {
 }
 
 export async function saveTasksBatch(payload) {
-    const response = await fetch(`${API_URL}/tasks/batch`, {
+    const response = await apiFetch(`/tasks/batch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -390,20 +436,20 @@ export async function saveTasksBatch(payload) {
 
 
 export async function getHiringHistory() {
-    const response = await fetch(`${API_URL}/analytics/decisions`);
+    const response = await apiFetch(`/analytics/decisions`);
     if (!response.ok) throw new Error("Failed to fetch hiring history");
     return response.json();
 }
 
 export async function getAnalyticsMetrics() {
-    const response = await fetch(`${API_URL}/analytics/metrics`);
+    const response = await apiFetch(`/analytics/metrics`);
     if (!response.ok) throw new Error("Failed to fetch analytics metrics");
     return response.json();
 }
 
 // === INVITE API ===
 export async function createInvite(jobId) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/invites`, {
+    const response = await apiFetch(`/jobs/${jobId}/invites`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
     });
@@ -415,7 +461,7 @@ export async function createInvite(jobId) {
 }
 
 export async function getJobInvites(jobId) {
-    const response = await fetch(`${API_URL}/jobs/${jobId}/invites`, {
+    const response = await apiFetch(`/jobs/${jobId}/invites`, {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" },
     });
@@ -424,7 +470,7 @@ export async function getJobInvites(jobId) {
 }
 
 export async function getInviteByToken(token) {
-    const response = await fetch(`${API_URL}/invites/${token}`);
+    const response = await apiFetch(`/invites/${token}`);
     if (response.status === 410) throw new Error("EXPIRED");
     if (response.status === 400) throw new Error("CLOSED");
     if (response.status >= 500) throw new Error("SERVER_ERROR");
@@ -436,7 +482,7 @@ export async function getInviteByToken(token) {
 }
 
 export async function submitInvite(token, data) {
-    const response = await fetch(`${API_URL}/invites/${token}/submit`, {
+    const response = await apiFetch(`/invites/${token}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -455,7 +501,7 @@ export async function submitInvite(token, data) {
 }
 
 export async function deleteInvite(inviteId) {
-    const response = await fetch(`${API_URL}/invites/${inviteId}`, {
+    const response = await apiFetch(`/invites/${inviteId}`, {
         method: "DELETE",
     });
     if (!response.ok) throw new Error("Failed to revoke invite");
@@ -463,7 +509,7 @@ export async function deleteInvite(inviteId) {
 }
 
 export async function deleteSubmission(submissionId) {
-    const response = await fetch(`${API_URL}/submissions/${submissionId}`, {
+    const response = await apiFetch(`/submissions/${submissionId}`, {
         method: "DELETE",
     });
     if (!response.ok) throw new Error("Failed to delete submission");
@@ -471,7 +517,7 @@ export async function deleteSubmission(submissionId) {
 }
 
 export async function updateSubmission(submissionId, data) {
-    const response = await fetch(`${API_URL}/submissions/${submissionId}`, {
+    const response = await apiFetch(`/submissions/${submissionId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),

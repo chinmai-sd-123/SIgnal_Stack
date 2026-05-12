@@ -17,4 +17,11 @@ class RecruiterResponse(RecruiterBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    role: str = "recruiter"
     created_at: datetime
+
+
+class RecruiterAuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    recruiter: RecruiterResponse

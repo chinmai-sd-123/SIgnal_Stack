@@ -3,7 +3,10 @@ from sqlalchemy.orm import Session
 from typing import List
 import app.schemas as schemas
 from app.config.database import get_db
+from app.models.job import Job
+from app.models.recruiter import Recruiter
 from app.services import crud
+from app.services.auth import ensure_job_access, get_current_recruiter
 from app.services.submission_proof_service import sync_outcome_invite_proofs
 from app.pipeline.signal_extractor import SignalExtractor
 from app.services.leetcode import LeetCodeService
@@ -11,20 +14,37 @@ from app.services.leetcode import LeetCodeService
 router = APIRouter(tags=["Signal Extractor"])
 
 @router.post("/proofs", response_model=schemas.ProofCreate)
-def submit_proof(proof: schemas.ProofCreate, db: Session = Depends(get_db)):
+def submit_proof(
+    proof: schemas.ProofCreate,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     # Verify outcome exists
     if proof.job_id:
         outcome = crud.get_outcome(db, proof.job_id)
         if not outcome:
             raise HTTPException(status_code=404, detail="Outcome not found")
+        if outcome.job_id:
+            job = db.query(Job).filter(Job.id == outcome.job_id).first()
+            ensure_job_access(job, current)
     result = crud.create_proof(db, proof)
     # Audit Log
     crud.create_audit_log(db, "proof", proof.job_id, "submitted", {"candidate": proof.candidate_id, "type": proof.type})
     return result
 
 @router.get("/proofs/{job_id}", response_model=List[schemas.ProofCreate])
-def get_proofs(job_id: str, db: Session = Depends(get_db)):
+def get_proofs(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     sync_outcome_invite_proofs(db, job_id)
+    outcome = crud.get_outcome(db, job_id)
+    if not outcome:
+        raise HTTPException(status_code=404, detail="Outcome not found")
+    if outcome.job_id:
+        job = db.query(Job).filter(Job.id == outcome.job_id).first()
+        ensure_job_access(job, current)
     proofs = crud.get_proofs(db, job_id)
     return [schemas.ProofCreate(
         job_id=p.outcome_id,

@@ -9,7 +9,8 @@ import {
     BarChart2,
     Menu,
     X,
-    Zap
+    Zap,
+    LogOut
 } from 'lucide-react';
 
 export default function Layout({ children }) {
@@ -17,16 +18,28 @@ export default function Layout({ children }) {
     const location = useLocation();
 
     // Hide recruiter chrome on candidate-facing pages
-    const isPublicRoute = location.pathname.startsWith('/apply');
+    const isPublicRoute = location.pathname.startsWith('/apply') || location.pathname.startsWith('/login');
+    const recruiterName = localStorage.getItem('recruiterName') || 'Recruiter';
+    const recruiterRole = localStorage.getItem('recruiterRole') || 'recruiter';
 
     const navigation = [
         { name: 'Jobs', href: '/', icon: ClipboardList },
         { name: 'Post Job', href: '/create-job', icon: Zap },
         { name: 'Review Queue', href: '/reviewer', icon: Search },
         { name: 'Decisions', href: '/hiring-decisions', icon: CheckCircle },
-        { name: 'System Learning', href: '/learning', icon: BarChart2 },
-        { name: 'Admin', href: '/admin', icon: Settings },
+        ...(recruiterRole === 'admin' ? [
+            { name: 'System Learning', href: '/learning', icon: BarChart2 },
+            { name: 'Admin', href: '/admin', icon: Settings },
+        ] : []),
     ];
+
+    const handleLogout = () => {
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('recruiterId');
+        localStorage.removeItem('recruiterName');
+        localStorage.removeItem('recruiterRole');
+        window.location.href = '/login';
+    };
 
     // Clean layout for candidates
     if (isPublicRoute) {
@@ -77,6 +90,20 @@ export default function Layout({ children }) {
                         </div>
 
                         {/* Mobile menu button */}
+                        <div className="hidden sm:flex items-center gap-3">
+                            <div className="text-right">
+                                <div className="text-sm font-medium text-gray-900 max-w-[180px] truncate">{recruiterName}</div>
+                                <div className="text-xs text-gray-500 capitalize">{recruiterRole}</div>
+                            </div>
+                            <button
+                                onClick={handleLogout}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-red-600 hover:bg-red-50"
+                            >
+                                <LogOut className="w-4 h-4" />
+                                Logout
+                            </button>
+                        </div>
+
                         <div className="-mr-2 flex items-center sm:hidden">
                             <button
                                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -115,6 +142,13 @@ export default function Layout({ children }) {
                                 </Link>
                             );
                         })}
+                        <button
+                            onClick={handleLogout}
+                            className="w-full block pl-3 pr-4 py-2 border-l-4 border-transparent text-base font-medium text-red-600 hover:bg-red-50 flex items-center gap-3"
+                        >
+                            <LogOut className="w-5 h-5" />
+                            Logout
+                        </button>
                     </div>
                 </div>
             </nav>

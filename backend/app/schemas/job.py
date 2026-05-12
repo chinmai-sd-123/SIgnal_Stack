@@ -34,6 +34,7 @@ class JobResponse(JobBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    recruiter_id: Optional[str] = None
     slug: Optional[str] = None
     category_slug: Optional[str] = None
     subcategory_slug: Optional[str] = None

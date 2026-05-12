@@ -4,6 +4,9 @@ from app.config.database import get_db
 from app.models.feedback import Feedback
 from app.models.outcome import Outcome
 from app.models.evaluation import Evaluation
+from app.models.job import Job
+from app.models.recruiter import Recruiter
+from app.services.auth import get_current_recruiter
 
 from typing import List, Dict, Any
 import json
@@ -11,7 +14,10 @@ import json
 router = APIRouter()
 
 @router.get("/decisions", response_model=List[Dict[str, Any]])
-def get_hiring_decisions(db: Session = Depends(get_db)):
+def get_hiring_decisions(
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """
     Get a history of all human hiring decisions.
     """
@@ -21,7 +27,10 @@ def get_hiring_decisions(db: Session = Depends(get_db)):
     ).outerjoin(
         Evaluation,
         Feedback.evaluation_id == Evaluation.id,
-    ).order_by(Feedback.created_at.desc()).all()
+    )
+    if current.role != "admin":
+        results = results.join(Job, Outcome.job_id == Job.id).filter(Job.recruiter_id == current.id)
+    results = results.order_by(Feedback.created_at.desc()).all()
     
     history = []
     for feedback, outcome, evaluation in results:
@@ -62,12 +71,21 @@ def get_hiring_decisions(db: Session = Depends(get_db)):
     return history
 
 @router.get("/metrics", response_model=Dict[str, Any])
-def get_analytics_metrics(db: Session = Depends(get_db)):
+def get_analytics_metrics(
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """
     Get high-level hiring metrics.
     """
-    feedbacks = db.query(Feedback).all()
-    outcomes = db.query(Outcome).count()
+    feedback_query = db.query(Feedback).join(Outcome, Feedback.job_id == Outcome.id)
+    outcome_query = db.query(Outcome)
+    if current.role != "admin":
+        feedback_query = feedback_query.join(Job, Outcome.job_id == Job.id).filter(Job.recruiter_id == current.id)
+        outcome_query = outcome_query.join(Job, Outcome.job_id == Job.id).filter(Job.recruiter_id == current.id)
+
+    feedbacks = feedback_query.all()
+    outcomes = outcome_query.count()
     
     total_decisions = len(feedbacks)
     hired_count = 0

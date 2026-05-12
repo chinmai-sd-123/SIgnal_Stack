@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, JSON, DateTime, Integer, Boolean, Float
+from sqlalchemy import Column, String, JSON, DateTime, Integer, Boolean, Float, ForeignKey
 from sqlalchemy.orm import relationship
 from app.config.database import Base
 from app.utils.time_utils import utc_now
@@ -13,6 +13,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(String, primary_key=True, index=True)
+    recruiter_id = Column(String, ForeignKey("recruiters.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String, nullable=False)  # e.g., "Backend Engineer"
     description = Column(String, nullable=True)
     version = Column(Integer, default=1)

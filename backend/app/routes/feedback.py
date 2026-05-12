@@ -3,14 +3,26 @@ from sqlalchemy.orm import Session
 from typing import List
 import app.schemas as schemas
 from app.config.database import get_db
+from app.models.job import Job
+from app.models.outcome import Outcome
+from app.models.recruiter import Recruiter
 from app.monitoring import track_feedback
 from app.services import crud
+from app.services.auth import ensure_job_access, get_current_recruiter, require_admin
 from app.pipeline.feedback import FeedbackLoop
 
 router = APIRouter(tags=["Feedback"])
 
 @router.post("/plugin/feedback")
-def submit_feedback(feedback: schemas.FeedbackCreate, db: Session = Depends(get_db)):
+def submit_feedback(
+    feedback: schemas.FeedbackCreate,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
+    outcome = db.query(Outcome).filter(Outcome.id == feedback.job_id).first()
+    if outcome and outcome.job_id:
+        job = db.query(Job).filter(Job.id == outcome.job_id).first()
+        ensure_job_access(job, current)
     # Store feedback
     db_feedback = crud.create_feedback(db, feedback)
     
@@ -32,8 +44,16 @@ def submit_feedback(feedback: schemas.FeedbackCreate, db: Session = Depends(get_
     return {"status": "feedback_recorded", "feedback_id": db_feedback.id, "changes": changes}
 
 @router.put("/feedback/reset/{job_id}")
-def reset_decision(job_id: str, db: Session = Depends(get_db)):
+def reset_decision(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """Reset the hiring decision for a job, allowing a new decision to be made."""
+    outcome = db.query(Outcome).filter(Outcome.id == job_id).first()
+    if outcome and outcome.job_id:
+        job = db.query(Job).filter(Job.id == outcome.job_id).first()
+        ensure_job_access(job, current)
     result = crud.reset_evaluation_decision(db, job_id)
     if not result:
         from fastapi import HTTPException
@@ -52,13 +72,21 @@ def reset_decision(job_id: str, db: Session = Depends(get_db)):
     return {"status": "decision_reset", "job_id": job_id}
 
 @router.post("/feedback/task-weight")
-def trigger_task_learning(request: schemas.TaskWeightFeedbackRequest, db: Session = Depends(get_db)):
+def trigger_task_learning(
+    request: schemas.TaskWeightFeedbackRequest,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """
     Trigger the Learning Loop to adjust Task weights in the Master Template
     based on feedback from a specific job instance.
     """
     loop = FeedbackLoop(db)
     try:
+        outcome = db.query(Outcome).filter(Outcome.id == request.job_id).first()
+        if outcome and outcome.job_id:
+            job = db.query(Job).filter(Job.id == outcome.job_id).first()
+            ensure_job_access(job, current)
         result = loop.process_task_feedback(request)
         crud.create_audit_log(db, "task_feedback", request.job_id, "recorded", {
             "task_name": request.task_name,
@@ -74,7 +102,7 @@ def trigger_task_learning(request: schemas.TaskWeightFeedbackRequest, db: Sessio
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/admin/signal-weights", response_model=List[schemas.SignalWeightResponse])
-def get_signal_weights(db: Session = Depends(get_db)):
+def get_signal_weights(db: Session = Depends(get_db), current: Recruiter = Depends(require_admin)):
     weights = crud.get_signal_weights(db)
     return [schemas.SignalWeightResponse(
         signal_name=w.signal_name,
@@ -83,17 +111,21 @@ def get_signal_weights(db: Session = Depends(get_db)):
     ) for w in weights]
 
 @router.get("/admin/audit-logs")
-def get_audit_logs(db: Session = Depends(get_db)):
+def get_audit_logs(db: Session = Depends(get_db), current: Recruiter = Depends(require_admin)):
     logs = crud.get_audit_logs(db)
     return [{"id": l.id, "entity_type": l.entity_type, "entity_id": l.entity_id, "action": l.action, "details": l.details_json, "created_at": l.created_at.isoformat()} for l in logs]
 
 @router.get("/admin/feedback")
-def get_feedback_list(db: Session = Depends(get_db)):
+def get_feedback_list(db: Session = Depends(get_db), current: Recruiter = Depends(require_admin)):
     feedback = crud.get_feedback_list(db)
     return [{"id": f.id, "job_id": f.job_id, "result": f.result, "metrics": f.metrics_json, "created_at": f.created_at.isoformat()} for f in feedback]
 
 @router.get("/admin/task-weight-history")
-def get_task_weight_history(limit: int = 100, db: Session = Depends(get_db)):
+def get_task_weight_history(
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(require_admin),
+):
     from app.models.outcome import Outcome
     from app.models.task import TaskWeightHistory
     from app.models.task import Task
@@ -122,7 +154,7 @@ def get_task_weight_history(limit: int = 100, db: Session = Depends(get_db)):
     ]
 
 @router.get("/admin/llm-logs")
-def get_all_llm_logs(db: Session = Depends(get_db)):
+def get_all_llm_logs(db: Session = Depends(get_db), current: Recruiter = Depends(require_admin)):
     from app.models.snapshot import LLMLog
     logs = db.query(LLMLog).order_by(LLMLog.created_at.desc()).limit(50).all()
     return [

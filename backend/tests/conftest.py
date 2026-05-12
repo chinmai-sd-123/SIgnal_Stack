@@ -69,6 +69,8 @@ def db_session(app_with_overrides):
 @pytest.fixture(scope="function")
 def client(app_with_overrides, db_session):
     app, db, engine, TestingSessionLocal = app_with_overrides
+    from app.models.recruiter import Recruiter
+    from app.services.auth import get_current_recruiter, require_admin
 
     def _get_db():
         try:
@@ -76,7 +78,18 @@ def client(app_with_overrides, db_session):
         finally:
             pass
 
+    def _test_recruiter():
+        return Recruiter(
+            id="test-recruiter",
+            email="test@example.com",
+            password="test",
+            role="admin",
+            name="Test Admin",
+        )
+
     app.dependency_overrides[db.get_db] = _get_db
+    app.dependency_overrides[get_current_recruiter] = _test_recruiter
+    app.dependency_overrides[require_admin] = _test_recruiter
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

@@ -15,10 +15,11 @@ const RecruiterLogin = () => {
 
         try {
             const data = await recruiterLogin({ email, password });
-            // Store recruiter info (demo purposes)
-            localStorage.setItem('recruiterId', data.id);
-            localStorage.setItem('recruiterName', data.name || data.email); // Fallback to email if name empty
-            navigate('/recruiter/dashboard');
+            localStorage.setItem('authToken', data.access_token);
+            localStorage.setItem('recruiterId', data.recruiter.id);
+            localStorage.setItem('recruiterName', data.recruiter.name || data.recruiter.email);
+            localStorage.setItem('recruiterRole', data.recruiter.role || 'recruiter');
+            navigate('/');
         } catch (err) {
             setError('Login failed. Please check your credentials.');
         }
@@ -31,6 +32,9 @@ const RecruiterLogin = () => {
                     <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
                         Recruiter Login
                     </h2>
+                    <p className="mt-2 text-center text-sm text-gray-500">
+                        Sign in with your recruiter email. New emails create a private workspace.
+                    </p>
                 </div>
                 <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
                     <input type="hidden" name="remember" value="true" />

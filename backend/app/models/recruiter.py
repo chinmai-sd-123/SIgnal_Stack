@@ -9,4 +9,5 @@ class Recruiter(Base):
     name = Column(String, nullable=True) # Optional now as per flow
     email = Column(String, unique=True, index=True, nullable=False)
     password = Column(String, nullable=False)
+    role = Column(String, default="recruiter", nullable=False)
     created_at = Column(DateTime, default=func.now())

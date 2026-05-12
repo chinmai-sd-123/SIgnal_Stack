@@ -8,7 +8,9 @@ from app.models.invite import Invite, InviteSubmission
 from app.models.job import Job
 from app.models.outcome import Outcome
 from app.models.proof import Proof
+from app.models.recruiter import Recruiter
 from app.services.bulk_evaluation_service import ensure_job_candidate
+from app.services.auth import ensure_job_access, get_current_recruiter
 from app.services.submission_proof_service import (
     create_proofs_for_submission,
     get_candidate_id,
@@ -78,11 +80,14 @@ def _update_proofs_for_submission(db: Session, submission: InviteSubmission, old
 # ─── Recruiter endpoints ────────────────────────────────────────────────────
 
 @router.post("/jobs/{job_id}/invites")
-def create_invite(job_id: str, db: Session = Depends(get_db)):
+def create_invite(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """Generate a reusable invite link for a job."""
     job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    ensure_job_access(job, current)
 
     invite = Invite(
         id=str(uuid.uuid4()),
@@ -107,11 +112,15 @@ def create_invite(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/jobs/{job_id}/invites")
-def list_invites(job_id: str, response: Response, db: Session = Depends(get_db)):
+def list_invites(
+    job_id: str,
+    response: Response,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """List all invites for a job with their submissions."""
     job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    ensure_job_access(job, current)
 
     response.headers["Cache-Control"] = "no-store"
     invites = db.query(Invite).filter(Invite.job_id == job_id).order_by(Invite.created_at.desc()).all()
@@ -152,11 +161,17 @@ def list_invites(job_id: str, response: Response, db: Session = Depends(get_db))
 
 
 @router.delete("/invites/{invite_id}")
-def revoke_invite(invite_id: str, db: Session = Depends(get_db)):
+def revoke_invite(
+    invite_id: str,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """Revoke an invite — also deletes all submissions AND their proofs from outcomes."""
     invite = db.query(Invite).filter(Invite.id == invite_id).first()
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
+    job = db.query(Job).filter(Job.id == invite.job_id).first()
+    ensure_job_access(job, current)
 
     # First, delete all proofs linked to this invite's submissions
     submissions = db.query(InviteSubmission).filter(InviteSubmission.invite_id == invite.id).all()
@@ -180,11 +195,17 @@ def revoke_invite(invite_id: str, db: Session = Depends(get_db)):
 # ─── Submission management (recruiter) ──────────────────────────────────────
 
 @router.delete("/submissions/{submission_id}")
-def delete_submission(submission_id: str, db: Session = Depends(get_db)):
+def delete_submission(
+    submission_id: str,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """Delete a single candidate submission and its proofs from all outcomes."""
     submission = db.query(InviteSubmission).filter(InviteSubmission.id == submission_id).first()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
+    job = db.query(Job).filter(Job.id == submission.job_id).first()
+    ensure_job_access(job, current)
 
     # Delete linked proofs first
     proofs_deleted = _delete_proofs_for_submission(db, submission)
@@ -202,11 +223,18 @@ def delete_submission(submission_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/submissions/{submission_id}")
-def update_submission(submission_id: str, data: dict, db: Session = Depends(get_db)):
+def update_submission(
+    submission_id: str,
+    data: dict,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """Edit a candidate's submission details. Also updates linked proofs."""
     submission = db.query(InviteSubmission).filter(InviteSubmission.id == submission_id).first()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
+    job = db.query(Job).filter(Job.id == submission.job_id).first()
+    ensure_job_access(job, current)
 
     # Track old candidate_id before update (for proof relinking)
     old_candidate_id = _get_candidate_id(submission)

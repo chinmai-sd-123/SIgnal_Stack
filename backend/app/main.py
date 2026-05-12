@@ -8,6 +8,8 @@ import app.models as models
 
 # Create tables
 models.Base.metadata.create_all(bind=engine)
+from app.services.schema_guard import ensure_runtime_schema
+ensure_runtime_schema(engine)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -67,7 +69,7 @@ async def debug_exception_handler(request, exc):
         content={"message": str(exc)},
     )
 
-from app.routes import outcome, task_decomposer, signal_extractor, evaluator, feedback, public_jobs, job
+from app.routes import outcome, task_decomposer, signal_extractor, evaluator, feedback, public_jobs, job, recruiter
 
 # Pipeline Routers
 app.include_router(outcome.router)
@@ -77,6 +79,7 @@ app.include_router(evaluator.router)
 app.include_router(feedback.router)
 app.include_router(public_jobs.router)
 app.include_router(job.router)
+app.include_router(recruiter.router)
 from app.routes import analytics
 app.include_router(analytics.router, prefix="/analytics")
 
@@ -98,9 +101,11 @@ app.include_router(invite.router)
 # Metrics endpoint
 from app.monitoring import get_all_metrics, get_prometheus_format
 from fastapi.responses import PlainTextResponse
+from app.models.recruiter import Recruiter
+from app.services.auth import require_admin
 
 @app.get("/metrics")
-def metrics():
+def metrics(current: Recruiter = Depends(require_admin)):
     """Prometheus-compatible metrics endpoint."""
     return get_all_metrics()
 
@@ -111,7 +116,11 @@ def prometheus_metrics():
 
 # Admin LLM Logs endpoint
 @app.get("/admin/evaluations/{evaluation_id}/llm_logs")
-def get_evaluation_llm_logs(evaluation_id: int, db: Session = Depends(get_db)):
+def get_evaluation_llm_logs(
+    evaluation_id: int,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(require_admin),
+):
     """Get LLM logs for a specific evaluation."""
     from app.services.llm_summarizer import get_llm_logs_for_evaluation
     logs = get_llm_logs_for_evaluation(db, evaluation_id)
@@ -119,7 +128,12 @@ def get_evaluation_llm_logs(evaluation_id: int, db: Session = Depends(get_db)):
 
 # Weight History endpoint
 @app.get("/admin/weight-history")
-def get_weight_history(signal_name: str = None, limit: int = 50, db: Session = Depends(get_db)):
+def get_weight_history(
+    signal_name: str = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(require_admin),
+):
     """Get weight change history for audit."""
     from app.services.weight_updater import get_weight_history as get_history
     history = get_history(db, signal_name, limit)

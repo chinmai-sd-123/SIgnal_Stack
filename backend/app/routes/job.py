@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session, joinedload
 from typing import List
 import uuid
@@ -6,6 +7,7 @@ import uuid
 from app.config.database import get_db
 from app.models import job as job_models
 from app.models.job_candidate import JobCandidate
+from app.models.recruiter import Recruiter
 from app.schemas import job as job_schemas
 from app.utils.slug_utils import slugify
 from app.utils.time_utils import utc_now
@@ -18,14 +20,28 @@ from app.services.bulk_evaluation_service import (
     recover_stale_job_evaluations,
 )
 from app.services import crud
+from app.services.auth import ensure_job_access, get_current_recruiter
 from app.services.submission_proof_service import sync_job_invite_proofs
 
 router = APIRouter()
 
 
+def _ensure_job_recruiter_column(db: Session):
+    columns = {column["name"] for column in inspect(db.bind).get_columns("jobs")}
+    if "recruiter_id" not in columns:
+        db.execute(text("ALTER TABLE jobs ADD COLUMN recruiter_id VARCHAR"))
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_recruiter_id ON jobs (recruiter_id)"))
+        db.commit()
+
+
 @router.post("/jobs", response_model=job_schemas.JobResponse)
-def create_job(job_data: job_schemas.JobCreate, db: Session = Depends(get_db)):
+def create_job(
+    job_data: job_schemas.JobCreate,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """Create a new job posting."""
+    _ensure_job_recruiter_column(db)
     job_id = str(uuid.uuid4())
     title_slug = slugify(job_data.title)
     company_slug = slugify(job_data.company)
@@ -33,6 +49,7 @@ def create_job(job_data: job_schemas.JobCreate, db: Session = Depends(get_db)):
     
     db_job = job_models.Job(
         id=job_id,
+        recruiter_id=current.id,
         title=job_data.title,
         description=job_data.description,
         company=job_data.company,
@@ -60,11 +77,18 @@ def create_job(job_data: job_schemas.JobCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/jobs", response_model=List[job_schemas.JobResponse])
-def list_jobs(include_archived: bool = False, db: Session = Depends(get_db)):
+def list_jobs(
+    include_archived: bool = False,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """List all jobs. By default, excludes archived jobs."""
+    _ensure_job_recruiter_column(db)
     query = db.query(job_models.Job).options(
         joinedload(job_models.Job.outcomes)
     )
+    if current.role != "admin":
+        query = query.filter(job_models.Job.recruiter_id == current.id)
     
     if not include_archived:
         query = query.filter(job_models.Job.status != "archived")
@@ -77,12 +101,12 @@ def list_jobs(include_archived: bool = False, db: Session = Depends(get_db)):
 def update_job_status(
     job_id: str,
     status_data: dict,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
 ):
     """Update job status (closed/archived)"""
     job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    ensure_job_access(job, current)
     
     new_status = status_data.get("status")
     if new_status not in ["active", "closed", "archived"]:
@@ -93,6 +117,22 @@ def update_job_status(
     db.refresh(job)
     
     return {"message": f"Job status updated to {new_status}", "job": job}
+
+
+@router.patch("/jobs/{job_id}/archive")
+def archive_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
+    """Archive a job from the dashboard archive action."""
+    job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
+    ensure_job_access(job, current)
+    job.status = "archived"
+    job.last_refreshed_at = utc_now()
+    db.commit()
+    db.refresh(job)
+    return {"message": "Job archived successfully", "job": job}
 
 
 # ============================================================================
@@ -115,9 +155,12 @@ def evaluate_candidate(
     job_id: str,
     candidate_id: str,
     evaluation: dict,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
 ):
     """Store evaluation results for a candidate"""
+    job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
+    ensure_job_access(job, current)
     # Find job candidate record
     job_candidate = db.query(JobCandidate).filter(
         JobCandidate.job_id == job_id,
@@ -142,12 +185,15 @@ def update_candidate_status(
     job_id: str,
     candidate_id: str,
     status_update: dict,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
 ):
     """
     Update candidate status (recruiter decision).
     Used when recruiter clicks 'Proceed to Interview' or 'Reject'.
     """
+    job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
+    ensure_job_access(job, current)
     # Find job candidate record
     job_candidate = db.query(JobCandidate).filter(
         JobCandidate.job_id == job_id,
@@ -184,8 +230,15 @@ def update_candidate_status(
 
 
 @router.get("/jobs/{job_id}/shortlist")
-def get_shortlist(job_id: str, auto_select: bool = False, db: Session = Depends(get_db)):
+def get_shortlist(
+    job_id: str,
+    auto_select: bool = False,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """Generate and retrieve shortlist with recommendations"""
+    job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
+    ensure_job_access(job, current)
     result = ShortlistService.generate_shortlist(
         db=db,
         job_id=job_id,
@@ -199,6 +252,7 @@ def queue_job_applications_for_evaluation(
     job_id: str,
     options: dict = None,
     db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
 ):
     """
     Queue scalable evaluation for all submissions on a job.
@@ -208,8 +262,7 @@ def queue_job_applications_for_evaluation(
     optionally deep-evaluates only the top N candidates.
     """
     job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    ensure_job_access(job, current)
 
     options = options or {}
     deep_limit = int(options.get("deep_limit", 25))
@@ -302,18 +355,25 @@ def get_job_application_evaluation_progress(
     job_id: str,
     response: Response,
     db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
 ):
     """Return stored progress for high-volume job evaluation."""
     job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    ensure_job_access(job, current)
     response.headers["Cache-Control"] = "no-store"
     return get_job_evaluation_progress(db, job_id)
 
 
 @router.patch("/jobs/{job_id}/shortlist")
-def update_shortlist(job_id: str, shortlist: dict, db: Session = Depends(get_db)):
+def update_shortlist(
+    job_id: str,
+    shortlist: dict,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """Manually update shortlist selection"""
+    job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
+    ensure_job_access(job, current)
     result = ShortlistService.update_shortlist(
         db=db,
         job_id=job_id,
@@ -323,33 +383,44 @@ def update_shortlist(job_id: str, shortlist: dict, db: Session = Depends(get_db)
 
 
 @router.post("/jobs/{job_id}/finalize-shortlist")
-def finalize_shortlist(job_id: str, db: Session = Depends(get_db)):
+def finalize_shortlist(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """
     Finalize shortlist and close applications.
     This transitions job status to 'closed'.
     """
+    job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
+    ensure_job_access(job, current)
     result = ShortlistService.finalize_shortlist(db=db, job_id=job_id)
     return result
 
 
 @router.get("/jobs/{job_id}", response_model=job_schemas.JobResponse)
-def get_job(job_id: str, db: Session = Depends(get_db)):
+def get_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """Get a single job by ID."""
     job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    return ensure_job_access(job, current)
 
 
 @router.get("/jobs/{job_id}/outcomes")
-def get_job_outcomes(job_id: str, db: Session = Depends(get_db)):
+def get_job_outcomes(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
+):
     """Get all outcomes for a specific job with their tasks."""
     from app.models import outcome as outcome_models
     from app.models import task as task_models
     
     job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    ensure_job_access(job, current)
     
     outcomes = db.query(outcome_models.Outcome).filter(
         outcome_models.Outcome.job_id == job_id
@@ -379,7 +450,8 @@ def get_job_outcomes(job_id: str, db: Session = Depends(get_db)):
 def delete_job(
     job_id: str, 
     hard_delete: bool = False,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current: Recruiter = Depends(get_current_recruiter),
 ):
     """
     Delete or archive a job.
@@ -387,8 +459,7 @@ def delete_job(
     - Hard delete: Permanently removes from database (only if no outcomes exist)
     """
     job = db.query(job_models.Job).filter(job_models.Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    ensure_job_access(job, current)
     
     if hard_delete:
         # Check if job has any outcomes
