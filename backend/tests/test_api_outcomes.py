@@ -186,3 +186,44 @@ def test_candidate_invite_page_loads_job_outcomes(client):
             "description": "Submit code to an LLM and return structured review feedback",
         }
     ]
+
+
+@pytest.mark.integration
+def test_save_as_template_uses_nullable_template_job_id(client):
+    job_resp = client.post("/jobs", json={
+        "title": "AI Engineer Intern",
+        "description": "Build applied AI systems",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Software Engineering",
+        "job_type": "Internship",
+    })
+    assert job_resp.status_code == 200
+    job_id = job_resp.json()["id"]
+
+    outcome_resp = client.post("/outcomes", json={
+        "job_id": job_id,
+        "title": "Ship AI Backend Services",
+        "description": "Turn AI prototypes into reliable backend APIs",
+        "company": "SignalStack",
+        "location": "Remote",
+        "category": "Software Engineering",
+        "job_type": "Internship",
+        "save_as_template": True,
+        "tasks": [
+            {"name": "Expose an AI workflow through an API", "priority": "High", "weight": 1.0},
+        ],
+    })
+    assert outcome_resp.status_code == 200
+    instance = outcome_resp.json()
+    assert instance["job_id"] == job_id
+    assert instance["is_template"] == 0
+    assert instance["source_template_id"]
+
+    templates_resp = client.get("/outcomes/templates")
+    assert templates_resp.status_code == 200
+    templates = templates_resp.json()
+    master = next(template for template in templates if template["id"] == instance["source_template_id"])
+    assert master["job_id"] is None
+    assert master["is_template"] == 1
+    assert master["title"] == "Ship AI Backend Services"
