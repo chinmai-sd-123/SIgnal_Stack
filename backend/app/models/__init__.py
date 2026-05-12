@@ -9,3 +9,4 @@ from .audit import AuditLog
 from .snapshot import Snapshot, LLMLog, SignalWeightHistory
 from .outcome_template import OutcomeTemplate
 from .invite import Invite, InviteSubmission
+from .job_candidate import JobCandidate
