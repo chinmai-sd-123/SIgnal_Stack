@@ -27,6 +27,36 @@ export default function HiringDecisions() {
         loadData();
     }, []);
 
+    const escapeCsvValue = (value) => {
+        const text = value == null ? '' : String(value);
+        return `"${text.replace(/"/g, '""')}"`;
+    };
+
+    const handleExport = () => {
+        const headers = ['Date', 'Candidate', 'Role', 'Company', 'Decision', 'Outcome ID', 'Job ID'];
+        const rows = history.map((record) => [
+            record.date ? new Date(record.date).toISOString() : '',
+            record.candidate || '',
+            record.job_title || '',
+            record.company || '',
+            record.decision || '',
+            record.outcome_id || '',
+            record.job_id || '',
+        ]);
+        const csv = [headers, ...rows]
+            .map((row) => row.map(escapeCsvValue).join(','))
+            .join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `hiring-decisions-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    };
+
     if (loading) return (
         <div className="min-h-screen flex items-center justify-center">
             <div className="text-center">
@@ -146,7 +176,11 @@ export default function HiringDecisions() {
                                 <p className="text-sm text-gray-500">Recent hiring decisions and outcomes</p>
                             </div>
                         </div>
-                        <button className="btn-secondary py-2 px-4 text-sm">
+                        <button
+                            onClick={handleExport}
+                            disabled={history.length === 0}
+                            className="btn-secondary py-2 px-4 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
                             Export Data
                         </button>
                     </div>

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.config.database import get_db
 from app.models.feedback import Feedback
@@ -9,7 +9,6 @@ from app.models.recruiter import Recruiter
 from app.services.auth import get_current_recruiter
 
 from typing import List, Dict, Any
-import json
 
 router = APIRouter()
 
@@ -79,31 +78,42 @@ def get_analytics_metrics(
     Get high-level hiring metrics.
     """
     feedback_query = db.query(Feedback).join(Outcome, Feedback.job_id == Outcome.id)
-    outcome_query = db.query(Outcome)
+    job_query = db.query(Job).filter(Job.status == "active")
     if current.role != "admin":
         feedback_query = feedback_query.join(Job, Outcome.job_id == Job.id).filter(Job.recruiter_id == current.id)
-        outcome_query = outcome_query.join(Job, Outcome.job_id == Job.id).filter(Job.recruiter_id == current.id)
+        job_query = job_query.filter(Job.recruiter_id == current.id)
 
     feedbacks = feedback_query.all()
-    outcomes = outcome_query.count()
+    active_jobs = job_query.count()
     
-    total_decisions = len(feedbacks)
     hired_count = 0
     rejected_count = 0
     
     for f in feedbacks:
         metrics = f.metrics_json or {}
         action = metrics.get('action_taken', '').lower()
-        if 'hire' in action:
+        selected = set(metrics.get("selected_candidates") or [])
+        if metrics.get("selected_candidate"):
+            selected.add(metrics["selected_candidate"])
+        rejected = set(metrics.get("rejected_candidates") or [])
+
+        if selected:
+            hired_count += len(selected)
+        elif 'hire' in action:
             hired_count += 1
+
+        if rejected:
+            rejected_count += len(rejected)
         elif 'reject' in action:
             rejected_count += 1
-            
-    acceptance_rate = (hired_count / total_decisions * 100) if total_decisions > 0 else 0
+
+    total_candidates_processed = hired_count + rejected_count
+    acceptance_rate = (hired_count / total_candidates_processed * 100) if total_candidates_processed > 0 else 0
     
     return {
-        "total_active_jobs": outcomes,
-        "total_candidates_processed": total_decisions, # Proxy for now
+        "total_active_jobs": active_jobs,
+        "total_candidates_processed": total_candidates_processed,
         "total_hired": hired_count,
+        "total_rejected": rejected_count,
         "acceptance_rate": round(acceptance_rate, 1)
     }
