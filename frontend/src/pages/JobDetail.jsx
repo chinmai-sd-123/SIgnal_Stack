@@ -331,6 +331,23 @@ export default function JobDetail() {
         progress.outcome_statuses?.find((item) => item.outcome_id === outcomeId)
     );
     const totalInviteSubmissions = invites.reduce((count, inv) => count + (inv.submissions?.length || 0), 0);
+    const partialReportCount = (progress.outcome_statuses || []).filter(
+        item => item.status === 'stale' && Number(item.report_candidate_count || 0) > 0
+    ).length;
+    const buildOutcomeReportPath = (outcomeId, reportStatus) => {
+        if (reportStatus?.status !== 'stale') return `/evaluation/${outcomeId}`;
+
+        const params = new URLSearchParams({
+            report_status: 'stale',
+            report_candidates: String(reportStatus.report_candidate_count || 0),
+            expected_candidates: String(reportStatus.report_expected_candidate_count || evaluatedCount || 0),
+        });
+        return `/evaluation/${outcomeId}?${params.toString()}`;
+    };
+    const hasViewableReport = (reportStatus) => (
+        reportStatus?.status === 'evaluated'
+        || (reportStatus?.status === 'stale' && Number(reportStatus.report_candidate_count || 0) > 0)
+    );
 
     return (
         <div className="max-w-5xl mx-auto space-y-8 pb-12">
@@ -453,6 +470,7 @@ export default function JobDetail() {
                         <p className="mt-1 text-sm text-gray-500">
                             {evaluationMessage || `${evaluatedCount} evaluated from ${submissionsTotal || totalInviteSubmissions} submissions`}
                             {outcomesTotal ? ` - ${outcomesEvaluated}/${outcomesTotal} outcomes ready` : ''}
+                            {partialReportCount ? ` - ${partialReportCount} partial report${partialReportCount === 1 ? '' : 's'} available` : ''}
                             {progress.queue_size ? ` - queue: ${progress.queue_size}` : ''}
                         </p>
                         <div className="mt-4 h-2 rounded-full bg-gray-100 overflow-hidden">
@@ -498,22 +516,27 @@ export default function JobDetail() {
                 )}
                 {progress.outcome_statuses?.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
-                        {progress.outcome_statuses.map(outcome => (
-                            <Link
-                                key={outcome.outcome_id}
-                                to={outcome.status === 'evaluated' ? `/evaluation/${outcome.outcome_id}` : `/dashboard/${outcome.outcome_id}`}
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                                    outcome.status === 'evaluated'
-                                        ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100'
-                                        : outcome.status === 'stale'
-                                            ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
-                                            : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
-                                }`}
-                            >
-                                <span className="max-w-[14rem] truncate">{outcome.title}</span>
-                                <span>{outcome.status === 'evaluated' ? 'View report' : outcome.status === 'stale' ? 'refresh needed' : 'pending'}</span>
-                            </Link>
-                        ))}
+                        {progress.outcome_statuses.map(outcome => {
+                            const canViewReport = hasViewableReport(outcome);
+                            const isPartialReport = outcome.status === 'stale' && Number(outcome.report_candidate_count || 0) > 0;
+
+                            return (
+                                <Link
+                                    key={outcome.outcome_id}
+                                    to={canViewReport ? buildOutcomeReportPath(outcome.outcome_id, outcome) : `/dashboard/${outcome.outcome_id}`}
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                                        outcome.status === 'evaluated'
+                                            ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100'
+                                            : isPartialReport
+                                                ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+                                                : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
+                                    }`}
+                                >
+                                    <span className="max-w-[14rem] truncate">{outcome.title}</span>
+                                    <span>{outcome.status === 'evaluated' ? 'View report' : isPartialReport ? 'View partial report' : 'pending'}</span>
+                                </Link>
+                            );
+                        })}
                     </div>
                 )}
             </div>
@@ -551,8 +574,12 @@ export default function JobDetail() {
                         {outcomes.map((outcome) => {
                             const reportStatus = getOutcomeReportStatus(outcome.id);
                             const hasReport = reportStatus?.status === 'evaluated';
-                            const hasStaleReport = reportStatus?.status === 'stale';
-                            const primaryPath = hasReport ? `/evaluation/${outcome.id}` : `/dashboard/${outcome.id}`;
+                            const hasPartialReport = reportStatus?.status === 'stale' && Number(reportStatus.report_candidate_count || 0) > 0;
+                            const reportCandidateCount = Number(reportStatus?.report_candidate_count || 0);
+                            const expectedCandidateCount = Number(reportStatus?.report_expected_candidate_count || evaluatedCount || 0);
+                            const primaryPath = hasViewableReport(reportStatus)
+                                ? buildOutcomeReportPath(outcome.id, reportStatus)
+                                : `/dashboard/${outcome.id}`;
 
                             return (
                             <div
@@ -567,13 +594,17 @@ export default function JobDetail() {
                                         <p className="text-gray-500 mt-1 line-clamp-2">{outcome.description}</p>
                                     </Link>
                                     <div className="flex items-center gap-2 flex-shrink-0">
-                                        {hasReport && (
+                                        {(hasReport || hasPartialReport) && (
                                             <Link
-                                                to={`/evaluation/${outcome.id}`}
-                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 text-green-700 border border-green-100 text-xs font-semibold hover:bg-green-100"
+                                                to={buildOutcomeReportPath(outcome.id, reportStatus)}
+                                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold ${
+                                                    hasReport
+                                                        ? 'bg-green-50 text-green-700 border-green-100 hover:bg-green-100'
+                                                        : 'bg-amber-50 text-amber-700 border-amber-100 hover:bg-amber-100'
+                                                }`}
                                             >
                                                 <FileText className="w-3.5 h-3.5" />
-                                                Report
+                                                {hasReport ? 'Report' : 'Partial Report'}
                                             </Link>
                                         )}
                                         <Link
@@ -605,15 +636,20 @@ export default function JobDetail() {
                                         }`}>
                                         {outcome.status}
                                     </span>
-                                    {(hasReport || hasStaleReport) && (
+                                    {(hasReport || hasPartialReport) && (
                                         <span className={`px-2 py-0.5 rounded text-xs font-medium border ${
                                             hasReport
                                                 ? 'bg-green-50 text-green-700 border-green-100'
                                                 : 'bg-amber-50 text-amber-700 border-amber-100'
                                         }`}>
                                             {hasReport
-                                                ? `Report ready${reportStatus.report_candidate_count ? ` - ${reportStatus.report_candidate_count} candidates` : ''}`
-                                                : `Report stale - ${reportStatus.report_candidate_count || 0}/${reportStatus.report_expected_candidate_count || evaluatedCount} candidates`}
+                                                ? `Report ready${reportCandidateCount ? ` - ${reportCandidateCount} candidates` : ''}`
+                                                : `Partial report - ${reportCandidateCount}/${expectedCandidateCount} candidates`}
+                                        </span>
+                                    )}
+                                    {hasPartialReport && visibleEvaluationActive && (
+                                        <span className="px-2 py-0.5 rounded text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-100">
+                                            refreshing full report
                                         </span>
                                     )}
                                 </div>

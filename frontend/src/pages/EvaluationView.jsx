@@ -47,6 +47,15 @@ export default function EvaluationView() {
     const [selectedCandidate, setSelectedCandidate] = useState(null);
 
     const anonymized = location.state?.anonymized || false;
+    const partialReportInfo = useMemo(() => {
+        const params = new URLSearchParams(location.search);
+        if (params.get('report_status') !== 'stale') return null;
+
+        return {
+            current: Number(params.get('report_candidates') || 0),
+            expected: Number(params.get('expected_candidates') || 0),
+        };
+    }, [location.search]);
 
     useEffect(() => {
         if (location.state?.result) {
@@ -321,6 +330,21 @@ export default function EvaluationView() {
                         </div>
                     )}
                 </div>
+
+                {partialReportInfo && (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-900 shadow-sm">
+                        <div className="flex items-start gap-3">
+                            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                            <div className="min-w-0">
+                                <div className="font-bold">Partial report shown</div>
+                                <p className="mt-1 text-sm text-amber-800">
+                                    This report currently includes {partialReportInfo.current}/{partialReportInfo.expected || partialReportInfo.current} evaluated candidates.
+                                    New candidate results are being refreshed in the job queue, so the complete report will replace this once ready.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Fit Score Summary Card */}
                 <div className="hero-gradient rounded-2xl p-8 text-white mb-8 shadow-xl">
