@@ -593,8 +593,13 @@ def queue_job_evaluation(
     )
 
 
-def mark_job_submissions_queued(db, job_id: str, rerun_evaluated: bool = False) -> int:
-    statuses = list(QUEUED_STATUSES)
+def mark_job_submissions_queued(
+    db,
+    job_id: str,
+    rerun_evaluated: bool = False,
+    retry_failed_only: bool = False,
+) -> int:
+    statuses = ["failed"] if retry_failed_only else list(QUEUED_STATUSES)
     if rerun_evaluated:
         statuses.extend(TERMINAL_EVALUATED_STATUSES)
 

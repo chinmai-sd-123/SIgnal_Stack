@@ -71,6 +71,45 @@ class _FakeRecoveryDb:
         self.commits += 1
 
 
+class _FakeSubmissionQuery:
+    def __init__(self, rows):
+        self.rows = rows
+        self.statuses = None
+
+    def filter(self, *criteria):
+        for criterion in criteria:
+            right = getattr(criterion, "right", None)
+            value = getattr(right, "value", None)
+            if isinstance(value, list):
+                self.statuses = set(value)
+        return self
+
+    def all(self):
+        if self.statuses is None:
+            return self.rows
+        return [row for row in self.rows if row.status in self.statuses]
+
+
+class _FakeSubmissionQueueDb:
+    def __init__(self, submissions, candidates):
+        self.submissions = submissions
+        self.candidates = candidates
+        self.commits = 0
+
+    def query(self, model):
+        if model is InviteSubmission:
+            return _FakeSubmissionQuery(self.submissions)
+        if model is JobCandidate:
+            return _FakeCandidateQuery(None)
+        return _FakeRecoveryQuery([])
+
+    def add(self, candidate):
+        self.candidates.append(candidate)
+
+    def commit(self):
+        self.commits += 1
+
+
 class _Proof:
     def __init__(self, invite_submission_id, outcome_id="outcome-1"):
         self.outcome_id = outcome_id
@@ -188,3 +227,19 @@ def test_recover_interrupted_evaluations_requeues_stuck_rows():
     assert candidate.status == "queued"
     assert candidate.evaluation_data["stage"] == "queued"
     assert db.commits == 1
+
+
+@pytest.mark.unit
+def test_mark_job_submissions_queued_can_retry_failed_only():
+    submitted = InviteSubmission(id="sub-new", job_id="job-1", status="submitted", github_username="new")
+    failed = InviteSubmission(id="sub-failed", job_id="job-1", status="failed", github_username="failed")
+    evaluated = InviteSubmission(id="sub-done", job_id="job-1", status="evaluated", github_username="done")
+    db = _FakeSubmissionQueueDb([submitted, failed, evaluated], [])
+
+    queued = bulk.mark_job_submissions_queued(db, "job-1", retry_failed_only=True)
+
+    assert queued == 1
+    assert submitted.status == "submitted"
+    assert failed.status == "queued"
+    assert evaluated.status == "evaluated"
+    assert db.candidates[0].candidate_id == "failed"

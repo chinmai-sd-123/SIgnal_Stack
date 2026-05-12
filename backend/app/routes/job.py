@@ -212,6 +212,7 @@ def queue_job_applications_for_evaluation(
     candidate_limit = options.get("candidate_limit")
     include_deep_evaluation = bool(options.get("include_deep_evaluation", True))
     rerun_evaluated = bool(options.get("rerun_evaluated", False))
+    retry_failed_only = bool(options.get("retry_failed_only", False))
 
     progress = get_job_evaluation_progress(db, job_id)
     if (progress.get("active_count", 0) > 0 or progress.get("queue_active")) and not rerun_evaluated:
@@ -229,6 +230,7 @@ def queue_job_applications_for_evaluation(
         db,
         job_id,
         rerun_evaluated=rerun_evaluated,
+        retry_failed_only=retry_failed_only,
     )
 
     if queued_count == 0:
