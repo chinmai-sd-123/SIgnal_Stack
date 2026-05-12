@@ -4,12 +4,12 @@ const DIMENSIONS = [
     {
         key: 'project_completion',
         label: 'Project Completion',
-        short: 'Completion',
+        short: 'Delivery',
     },
     {
         key: 'engineering_quality',
         label: 'Code Quality',
-        short: 'Quality',
+        short: 'Implementation',
     },
     {
         key: 'communication',
@@ -56,28 +56,43 @@ const formatScore = (value) => {
 
 const getTone = (value) => {
     if (value >= 7) return {
-        text: 'text-emerald-700',
-        fill: 'from-emerald-500 to-teal-500',
-        bg: 'bg-emerald-50',
-        border: 'border-emerald-100',
+        label: 'Strong',
+        text: 'text-primary',
+        fill: 'from-primary via-primary-hover to-accent',
+        bg: 'from-primary/10 via-white to-accent/10',
+        border: 'border-primary/20',
+        chip: 'bg-primary-soft text-primary border-primary/20',
     };
     if (value >= 4.5) return {
+        label: 'Developing',
         text: 'text-amber-700',
-        fill: 'from-amber-400 to-yellow-500',
-        bg: 'bg-amber-50',
-        border: 'border-amber-100',
+        fill: 'from-accent via-amber-400 to-primary-hover',
+        bg: 'from-accent/14 via-white to-primary/8',
+        border: 'border-accent/25',
+        chip: 'bg-accent-soft text-amber-800 border-accent/25',
     };
     return {
-        text: 'text-red-700',
-        fill: 'from-rose-500 to-red-500',
-        bg: 'bg-red-50',
-        border: 'border-red-100',
+        label: 'Needs Proof',
+        text: 'text-rose-700',
+        fill: 'from-rose-500 via-red-500 to-accent',
+        bg: 'from-rose-50 via-white to-accent/10',
+        border: 'border-rose-200',
+        chip: 'bg-rose-50 text-rose-700 border-rose-200',
     };
 };
 
 const average = (items) => {
     if (!items.length) return 0;
     return items.reduce((sum, item) => sum + item.candidate, 0) / items.length;
+};
+
+const clampPercent = (value) => Math.max(0, Math.min(100, value * 10));
+
+const formatDelta = (candidateAverage, roleAverage) => {
+    if (roleAverage === null) return null;
+    const delta = candidateAverage - roleAverage;
+    if (Math.abs(delta) < 0.05) return 'Aligned with role avg';
+    return `${delta > 0 ? '+' : ''}${delta.toFixed(1)} vs role avg`;
 };
 
 const DimensionChart = ({ dimensions, averageDimensions }) => {
@@ -95,57 +110,72 @@ const DimensionChart = ({ dimensions, averageDimensions }) => {
     const candidateAverage = average(rows);
     const roleAverage = averageDimensions ? average(rows.map((row) => ({ candidate: row.average ?? 0 }))) : null;
     const tone = getTone(candidateAverage);
+    const deltaLabel = formatDelta(candidateAverage, roleAverage);
 
     return (
-        <div className="w-full space-y-4">
-            <div className={`rounded-xl border ${tone.border} ${tone.bg} p-4`}>
-                <div className="flex items-end justify-between gap-3">
-                    <div>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Candidate</div>
-                        <div className={`mt-1 text-3xl font-bold ${tone.text}`}>
-                            {formatScore(candidateAverage)}
-                            <span className="text-sm font-semibold text-gray-500">/10</span>
+        <div className="w-full space-y-5">
+            <div className={`rounded-2xl border ${tone.border} bg-gradient-to-br ${tone.bg} p-4 shadow-sm`}>
+                <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                        <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-text-secondary">Candidate Avg</div>
+                        <div className={`mt-1 flex items-end gap-1 font-bold ${tone.text}`}>
+                            <span className="text-4xl leading-none tabular-nums">{formatScore(candidateAverage)}</span>
+                            <span className="pb-1 text-sm font-semibold text-text-secondary">/10</span>
                         </div>
+                        {deltaLabel && (
+                            <div className="mt-2 text-xs font-semibold text-text-secondary">{deltaLabel}</div>
+                        )}
                     </div>
+
                     {roleAverage !== null && (
-                        <div className="text-right">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Role Avg</div>
-                            <div className="mt-1 text-lg font-bold text-gray-600">
+                        <div className="shrink-0 rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-right shadow-sm backdrop-blur">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-text-muted">Role Avg</div>
+                            <div className="mt-1 text-lg font-bold tabular-nums text-text-main">
                                 {formatScore(roleAverage)}
-                                <span className="text-xs font-semibold text-gray-400">/10</span>
+                                <span className="text-xs font-semibold text-text-muted">/10</span>
                             </div>
                         </div>
                     )}
                 </div>
+
+                <div className={`mt-4 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${tone.chip}`}>
+                    {tone.label}
+                </div>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
                 {rows.map((row) => {
                     const rowTone = getTone(row.candidate);
-                    const candidatePercent = `${row.candidate * 10}%`;
-                    const averagePercent = row.average === null ? null : `${row.average * 10}%`;
+                    const candidatePercent = clampPercent(row.candidate);
+                    const averagePercent = row.average === null ? null : clampPercent(row.average);
 
                     return (
-                        <div key={row.key} className="space-y-1.5">
+                        <div key={row.key} className="space-y-2">
                             <div className="flex items-baseline justify-between gap-3">
                                 <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-gray-800 truncate">{row.label}</div>
-                                    <div className="text-[11px] font-medium text-gray-400">{row.short}</div>
+                                    <div className="truncate text-sm font-bold text-text-main">{row.label}</div>
+                                    <div className="text-[11px] font-semibold text-text-muted">{row.short}</div>
                                 </div>
-                                <div className={`text-sm font-bold tabular-nums ${rowTone.text}`}>
+                                <div className={`shrink-0 text-sm font-bold tabular-nums ${rowTone.text}`}>
                                     {formatScore(row.candidate)}
                                 </div>
                             </div>
 
-                            <div className="relative h-3 rounded-full bg-gray-100">
+                            <div
+                                className="relative h-3 overflow-visible rounded-full border border-white bg-light-200 shadow-inner"
+                                aria-label={`${row.label}: candidate ${formatScore(row.candidate)} out of 10${row.average !== null ? `, role average ${formatScore(row.average)} out of 10` : ''}`}
+                            >
                                 <div
-                                    className={`absolute inset-y-0 left-0 rounded-full bg-gradient-to-r ${rowTone.fill}`}
-                                    style={{ width: candidatePercent }}
+                                    className={`absolute inset-y-0 left-0 rounded-full bg-gradient-to-r ${rowTone.fill} shadow-sm`}
+                                    style={{
+                                        width: `${candidatePercent}%`,
+                                        minWidth: row.candidate > 0 ? '10px' : '0px',
+                                    }}
                                 />
-                                {averagePercent && (
+                                {averagePercent !== null && (
                                     <div
-                                        className="absolute top-[-2px] h-7 w-0.5 rounded-full bg-gray-500/70"
-                                        style={{ left: averagePercent }}
+                                        className="absolute -top-1 h-5 w-0.5 -translate-x-1/2 rounded-full bg-text-secondary shadow-[0_0_0_2px_rgba(255,253,248,0.92)]"
+                                        style={{ left: `${Math.max(2, Math.min(98, averagePercent))}%` }}
                                         title={`Role average ${formatScore(row.average)}/10`}
                                     />
                                 )}
@@ -156,13 +186,13 @@ const DimensionChart = ({ dimensions, averageDimensions }) => {
             </div>
 
             {averageDimensions && (
-                <div className="flex items-center gap-4 text-[11px] font-semibold text-gray-500 pt-1">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-light-200 pt-3 text-[11px] font-semibold text-text-secondary">
                     <div className="flex items-center gap-1.5">
-                        <span className="h-2.5 w-5 rounded-full bg-gradient-to-r from-rose-500 to-red-500" />
+                        <span className="h-2.5 w-6 rounded-full bg-gradient-to-r from-primary via-primary-hover to-accent" />
                         <span>Candidate</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                        <span className="h-4 w-0.5 rounded-full bg-gray-500/70" />
+                        <span className="h-4 w-0.5 rounded-full bg-text-secondary" />
                         <span>Role Avg</span>
                     </div>
                 </div>
