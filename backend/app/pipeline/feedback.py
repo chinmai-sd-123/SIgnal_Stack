@@ -56,13 +56,24 @@ class FeedbackLoop:
     def process_task_feedback(self, request: schemas.TaskWeightFeedbackRequest) -> Dict[str, Any]:
         logger.debug("Processing feedback for Job ID: '%s'", request.job_id)
         
-        # 1. Find Job & Outcome Instance
+        # 1. Find the Outcome instance. The UI may send either an outcome id
+        # or a job id; for job ids with multiple outcomes, pick the outcome
+        # that actually owns the task being adjusted.
         from sqlalchemy import or_
-        outcome_instance = self.db.query(models.Outcome).filter(
+        outcome_candidates = self.db.query(models.Outcome).filter(
             or_(models.Outcome.job_id == request.job_id, models.Outcome.id == request.job_id)
-        ).first()
+        ).all()
+        outcome_instance = next(
+            (
+                outcome for outcome in outcome_candidates
+                if any(task.name == request.task_name for task in outcome.tasks)
+            ),
+            None,
+        )
         if not outcome_instance:
-             raise ValueError("Job/Outcome not found")
+            if outcome_candidates:
+                raise ValueError(f"Task '{request.task_name}' not found in matching outcome/job instance.")
+            raise ValueError("Job/Outcome not found")
 
         changes_log = []
         DELTA = 0.15
