@@ -27,7 +27,20 @@ PATH_KEYWORD_STOPWORDS = {
     "app", "api", "backend", "server", "handler", "request", "response", "model",
     "table", "column", "service", "function", "import", "export", "container",
     "deployment", "image", "from", "run", "cmd",
-    "and", "or", "the", "with",
+    "and", "or", "the", "with", "candidate", "outcome", "description", "signal",
+    "project", "application", "using", "code", "build", "create", "implement",
+}
+
+AI_PROVIDER_KEYWORDS = {
+    "ai", "llm", "openai", "claude", "anthropic", "gemini", "genai",
+    "google-generativeai", "google", "api_key", "apikey", "credentials",
+    "credential", "prompt", "responses.create", "chat.completions",
+    "generate_content",
+}
+
+AI_PROVIDER_PATH_HINTS = {
+    "llm", "openai", "anthropic", "claude", "gemini", "genai", "ai",
+    "prompt", "config", "settings", "secrets",
 }
 
 
@@ -122,6 +135,21 @@ def get_file_priority(file_path: str, keywords: Optional[List[str]] = None) -> T
     if filename_lower == "__init__.py":
         return (0, "other")
 
+    keyword_set = {
+        kw.lower().strip()
+        for kw in (keywords or [])
+        if kw and len(kw.lower().strip()) >= 2
+    }
+
+    if keyword_set & AI_PROVIDER_KEYWORDS:
+        path_parts = set(re.split(r"[/_.\-]+", file_lower))
+        if path_parts & AI_PROVIDER_PATH_HINTS:
+            if filename_lower.endswith(CODE_EXTENSIONS):
+                return (145, "task_specific")
+            return (110, "task_specific")
+        if filename_lower in {"requirements.txt", "pyproject.toml", "package.json", ".env.example"}:
+            return (105, "manifest")
+
     # Task-specific implementation files should outrank generic manifests,
     # README, Docker, and CI files. Otherwise the LLM sees infrastructure before
     # the actual code that proves capability.
@@ -176,6 +204,38 @@ def get_file_priority(file_path: str, keywords: Optional[List[str]] = None) -> T
 
     # Default low priority for other files
     return (0, "other")
+
+
+def score_content_relevance(file_path: str, content: str, keywords: Optional[List[str]] = None) -> int:
+    """Score file content against task keywords without trusting README-only claims."""
+    if not content or not keywords:
+        return 0
+
+    lower = content.lower()
+    score = 0
+    seen_hits = set()
+    for keyword in keywords:
+        kw = keyword.lower().strip()
+        if len(kw) < 3 or kw in PATH_KEYWORD_STOPWORDS:
+            continue
+        if kw in lower and kw not in seen_hits:
+            seen_hits.add(kw)
+            score += 5 if kw in AI_PROVIDER_KEYWORDS else 2
+
+    if keyword_set := ({kw.lower().strip() for kw in keywords} & AI_PROVIDER_KEYWORDS):
+        provider_patterns = [
+            "openai(", "from openai import", "import openai", "responses.create",
+            "chat.completions", "anthropic(", "from anthropic import",
+            "google.generativeai", "google_genai", "generate_content",
+            "openai_api_key", "anthropic_api_key", "gemini_api_key", "api_key",
+        ]
+        for pattern in provider_patterns:
+            if pattern in lower:
+                score += 12
+        if keyword_set and file_path.lower().endswith(CODE_EXTENSIONS):
+            score += 5
+
+    return score
 
 
 def priority_files(

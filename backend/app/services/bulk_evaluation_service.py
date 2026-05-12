@@ -460,6 +460,18 @@ def _screen_submission(db, submission: InviteSubmission, extractor: SignalExtrac
     }
 
 
+def _queued_submissions(db, job_id: str, candidate_limit: Optional[int] = None) -> List[InviteSubmission]:
+    query = db.query(InviteSubmission).filter(
+        InviteSubmission.job_id == job_id,
+        InviteSubmission.status.in_(list(QUEUED_STATUSES)),
+    ).order_by(InviteSubmission.submitted_at.asc())
+
+    if candidate_limit:
+        query = query.limit(candidate_limit)
+
+    return query.all()
+
+
 def _deep_evaluate_top_candidates(
     db,
     job_id: str,
@@ -535,7 +547,7 @@ def _deep_evaluate_top_candidates(
 
 def evaluate_job_applications_sync(
     job_id: str,
-    deep_limit: int = 100,
+    deep_limit: int = 25,
     candidate_limit: Optional[int] = None,
     include_deep_evaluation: bool = True,
 ) -> Dict[str, Any]:
@@ -551,48 +563,60 @@ def evaluate_job_applications_sync(
 
         _recover_interrupted_evaluations(db, job_id)
 
-        query = db.query(InviteSubmission).filter(
-            InviteSubmission.job_id == job_id,
-            InviteSubmission.status.in_(list(QUEUED_STATUSES)),
-        ).order_by(InviteSubmission.submitted_at.asc())
-
-        if candidate_limit:
-            query = query.limit(candidate_limit)
-
-        submissions = query.all()
         extractor = SignalExtractor()
         screened: List[Dict[str, Any]] = []
         signals_by_candidate: Dict[str, Dict[str, Any]] = {}
 
-        for submission in submissions:
-            candidate_id = candidate_id_for_submission(submission)
-            try:
-                result = _screen_submission(db, submission, extractor)
-                screened.append(result)
-                if result.get("signals"):
-                    signals_by_candidate[candidate_id] = result["signals"]
-            except Exception as exc:
-                logger.exception("Failed to screen submission %s", submission.id)
-                candidate = ensure_job_candidate(db, job_id, candidate_id, status="failed")
-                _mark_failure(db, candidate, submission, str(exc))
-                screened.append({"candidate_id": candidate_id, "status": "failed", "score": 0.0})
-
-        successful = [row for row in screened if row.get("status") == "evaluated"]
-        top_candidate_ids = _candidate_ids_for_deep_evaluation(
-            db,
-            job_id,
-            deep_limit,
-            signals_by_candidate,
-        )
-
         evaluations_created = 0
-        if include_deep_evaluation and top_candidate_ids and deep_limit > 0:
-            evaluations_created = _deep_evaluate_top_candidates(
+        deep_evaluated_candidates = 0
+        remaining_candidate_limit = candidate_limit
+        max_cycles = 1 if candidate_limit else 3
+
+        for cycle in range(max_cycles):
+            submissions = _queued_submissions(db, job_id, remaining_candidate_limit)
+
+            if not submissions and cycle > 0:
+                break
+
+            for submission in submissions:
+                candidate_id = candidate_id_for_submission(submission)
+                try:
+                    result = _screen_submission(db, submission, extractor)
+                    screened.append(result)
+                    if result.get("signals"):
+                        signals_by_candidate[candidate_id] = result["signals"]
+                except Exception as exc:
+                    logger.exception("Failed to screen submission %s", submission.id)
+                    candidate = ensure_job_candidate(db, job_id, candidate_id, status="failed")
+                    _mark_failure(db, candidate, submission, str(exc))
+                    screened.append({"candidate_id": candidate_id, "status": "failed", "score": 0.0})
+
+            if remaining_candidate_limit is not None:
+                remaining_candidate_limit = max(0, remaining_candidate_limit - len(submissions))
+
+            top_candidate_ids = _candidate_ids_for_deep_evaluation(
                 db,
                 job_id,
-                top_candidate_ids,
+                deep_limit,
                 signals_by_candidate,
             )
+            deep_evaluated_candidates = len(top_candidate_ids)
+
+            if include_deep_evaluation and top_candidate_ids and deep_limit > 0:
+                evaluations_created += _deep_evaluate_top_candidates(
+                    db,
+                    job_id,
+                    top_candidate_ids,
+                    signals_by_candidate,
+                )
+
+            if remaining_candidate_limit == 0:
+                break
+
+            if not _queued_submissions(db, job_id, 1):
+                break
+
+        successful = [row for row in screened if row.get("status") == "evaluated"]
 
         success = True
         return {
@@ -600,7 +624,7 @@ def evaluate_job_applications_sync(
             "screened": len(screened),
             "evaluated": len(successful),
             "failed": len([row for row in screened if row.get("status") == "failed"]),
-            "deep_evaluated_candidates": len(top_candidate_ids) if include_deep_evaluation else 0,
+            "deep_evaluated_candidates": deep_evaluated_candidates if include_deep_evaluation else 0,
             "evaluations_created": evaluations_created,
         }
     finally:
@@ -610,7 +634,7 @@ def evaluate_job_applications_sync(
 
 def queue_job_evaluation(
     job_id: str,
-    deep_limit: int = 100,
+    deep_limit: int = 25,
     candidate_limit: Optional[int] = None,
     include_deep_evaluation: bool = True,
 ) -> str:
@@ -690,6 +714,13 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
     if outcome_ids:
         evaluations = db.query(Evaluation).filter(Evaluation.outcome_id.in_(outcome_ids)).all()
     evaluated_outcome_ids = {item.outcome_id for item in evaluations if item.evaluation_json}
+    latest_evaluation_by_outcome: Dict[str, Evaluation] = {}
+    for item in evaluations:
+        if not item.evaluation_json:
+            continue
+        current = latest_evaluation_by_outcome.get(item.outcome_id)
+        if not current or (item.created_at or utc_now()) > (current.created_at or utc_now()):
+            latest_evaluation_by_outcome[item.outcome_id] = item
 
     job_queue_size = get_job_evaluation_queue_size(job_id)
 
@@ -704,6 +735,13 @@ def get_job_evaluation_progress(db, job_id: str) -> Dict[str, Any]:
                 "outcome_id": outcome.id,
                 "title": outcome.title,
                 "status": "evaluated" if outcome.id in evaluated_outcome_ids else "pending",
+                "latest_evaluation_id": latest_evaluation_by_outcome.get(outcome.id).id
+                if outcome.id in latest_evaluation_by_outcome else None,
+                "latest_evaluated_at": latest_evaluation_by_outcome.get(outcome.id).created_at.isoformat()
+                if outcome.id in latest_evaluation_by_outcome and latest_evaluation_by_outcome[outcome.id].created_at else None,
+                "report_candidate_count": len(
+                    (latest_evaluation_by_outcome.get(outcome.id).evaluation_json or {}).get("candidate_summaries", [])
+                ) if outcome.id in latest_evaluation_by_outcome else 0,
             }
             for outcome in outcomes
         ],

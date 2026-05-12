@@ -22,6 +22,7 @@ export default function Admin() {
     const [taskWeightHistory, setTaskWeightHistory] = useState([]);
     const [auditLogs, setAuditLogs] = useState([]);
     const [llmLogs, setLlmLogs] = useState([]);
+    const [llmMetrics, setLlmMetrics] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [expandedLog, setExpandedLog] = useState(null);
@@ -43,8 +44,12 @@ export default function Admin() {
                 const data = await fetchJson('/admin/audit-logs');
                 setAuditLogs(Array.isArray(data) ? data : []);
             } else if (activeTab === 'llm') {
-                const logData = await fetchJson('/admin/llm-logs');
+                const [logData, metricsData] = await Promise.all([
+                    fetchJson('/admin/llm-logs'),
+                    fetchJson('/metrics'),
+                ]);
                 setLlmLogs(Array.isArray(logData) ? logData : []);
+                setLlmMetrics(metricsData || null);
             }
         } catch (error) {
             console.error('Error fetching data:', error);
@@ -63,6 +68,14 @@ export default function Admin() {
         { id: 'audit', label: 'Audit Logs', icon: History },
         { id: 'llm', label: 'LLM Logs', icon: FileText },
     ];
+
+    const formatCount = (value) => Number(value || 0).toLocaleString();
+    const formatCost = (value) => `$${Number(value || 0).toFixed(4)}`;
+    const formatSeconds = (value) => `${Number(value || 0).toFixed(2)}s`;
+    const llmCounters = llmMetrics?.counters || {};
+    const llmLatency = llmMetrics?.histograms?.llm_latency_seconds || {};
+    const llmCostByCandidate = llmMetrics?.labeled_gauges?.cost_per_candidate || {};
+    const llmCostByJob = llmMetrics?.labeled_gauges?.cost_per_job || {};
 
     return (
         <div className="max-w-7xl mx-auto space-y-6">
@@ -124,10 +137,15 @@ export default function Admin() {
                                     <h2 className="heading-2 mb-4">Current Signal Weights</h2>
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                         {weights.map((w, i) => (
-                                            <div key={i} className="rounded-lg p-4 border border-gray-200 bg-gray-50">
-                                                <div className="flex justify-between items-center">
-                                                    <span className="font-medium text-gray-700">{w.signal_name}</span>
-                                                    <span className="text-lg font-bold text-primary">{(w.weight * 100).toFixed(0)}%</span>
+                                            <div key={i} className="rounded-lg p-4 border border-gray-200 bg-gray-50 min-w-0">
+                                                <div className="flex justify-between items-start gap-3 min-w-0">
+                                                    <span
+                                                        className="font-medium text-gray-700 text-sm leading-5 break-all min-w-0"
+                                                        title={w.signal_name}
+                                                    >
+                                                        {w.signal_name}
+                                                    </span>
+                                                    <span className="text-lg font-bold text-primary flex-shrink-0">{(w.weight * 100).toFixed(0)}%</span>
                                                 </div>
                                                 <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
                                                     <div
@@ -225,13 +243,90 @@ export default function Admin() {
 
                         {/* LLM Logs Tab */}
                         {activeTab === 'llm' && (
-                            <div>
-                                <h2 className="heading-2 mb-4">LLM Interaction Logs</h2>
+                            <div className="space-y-6">
+                                <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+                                    <div>
+                                        <h2 className="heading-2">LLM Interaction Logs</h2>
+                                        <p className="text-sm text-gray-500 mt-1">
+                                            Runtime usage metrics come from the live metrics endpoint; detailed prompt logs are shown when persisted.
+                                        </p>
+                                    </div>
+                                    <a
+                                        href={`${API_BASE}/metrics/prometheus`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-sm font-medium text-primary hover:underline"
+                                    >
+                                        Prometheus metrics
+                                    </a>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">LLM Calls</div>
+                                        <div className="mt-2 text-2xl font-bold text-gray-900">{formatCount(llmCounters.llm_calls_total)}</div>
+                                        <div className="mt-1 text-xs text-gray-500">{formatCount(llmCounters.llm_failures_total)} failures</div>
+                                    </div>
+                                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Tokens</div>
+                                        <div className="mt-2 text-2xl font-bold text-gray-900">
+                                            {formatCount(Number(llmCounters.llm_input_tokens_total || 0) + Number(llmCounters.llm_output_tokens_total || 0))}
+                                        </div>
+                                        <div className="mt-1 text-xs text-gray-500">
+                                            {formatCount(llmCounters.llm_input_tokens_total)} in / {formatCount(llmCounters.llm_output_tokens_total)} out
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Estimated Cost</div>
+                                        <div className="mt-2 text-2xl font-bold text-gray-900">{formatCost(llmCounters.llm_estimated_cost_total)}</div>
+                                        <div className="mt-1 text-xs text-gray-500">Tracked from provider usage</div>
+                                    </div>
+                                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Latency</div>
+                                        <div className="mt-2 text-2xl font-bold text-gray-900">{formatSeconds(llmLatency.avg)}</div>
+                                        <div className="mt-1 text-xs text-gray-500">p95 {formatSeconds(llmLatency.p95)} / {formatCount(llmLatency.count)} samples</div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                                        <h3 className="font-semibold text-gray-900 mb-3">Cache</h3>
+                                        <div className="grid grid-cols-3 gap-3 text-sm">
+                                            <div>
+                                                <div className="text-gray-500">Hits</div>
+                                                <div className="font-bold text-gray-900">{formatCount(llmCounters.llm_cache_hits_total)}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-gray-500">Misses</div>
+                                                <div className="font-bold text-gray-900">{formatCount(llmCounters.llm_cache_misses_total)}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-gray-500">Usage Missing</div>
+                                                <div className="font-bold text-gray-900">{formatCount(llmCounters.llm_usage_missing_total)}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                                        <h3 className="font-semibold text-gray-900 mb-3">Cost Attribution</h3>
+                                        <div className="grid grid-cols-2 gap-3 text-sm">
+                                            <div>
+                                                <div className="text-gray-500">Candidates</div>
+                                                <div className="font-bold text-gray-900">{formatCount(Object.keys(llmCostByCandidate).length)}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-gray-500">Jobs</div>
+                                                <div className="font-bold text-gray-900">{formatCount(Object.keys(llmCostByJob).length)}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div className="space-y-3 max-h-[600px] overflow-y-auto">
                                     {llmLogs.length === 0 ? (
-                                        <div className="text-center py-8">
+                                        <div className="text-center py-8 border border-dashed border-gray-200 rounded-lg bg-gray-50">
                                             <AlertTriangle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                                            <p className="text-gray-500">No LLM logs recorded yet</p>
+                                            <p className="text-gray-500">No persisted prompt logs recorded yet</p>
+                                            <p className="text-xs text-gray-400 mt-1">Usage, token, latency, cache, and cost metrics are still shown above.</p>
                                         </div>
                                     ) : (
                                         llmLogs.map((log, i) => (

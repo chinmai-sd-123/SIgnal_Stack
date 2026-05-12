@@ -227,3 +227,63 @@ def test_save_as_template_uses_nullable_template_job_id(client):
     assert master["job_id"] is None
     assert master["is_template"] == 1
     assert master["title"] == "Ship AI Backend Services"
+
+
+@pytest.mark.integration
+def test_create_multiple_saved_templates_for_one_job(client):
+    job_resp = client.post("/jobs", json={
+        "title": "AI Engineer Intern",
+        "description": "Convert AI prototypes into production systems",
+        "company": "ClickPost",
+        "location": "Bangalore",
+        "category": "Software Engineering",
+        "job_type": "Internship",
+    })
+    assert job_resp.status_code == 200
+    job_id = job_resp.json()["id"]
+
+    outcomes = [
+        "Productionize AI Backend Services",
+        "Build RAG or Internal Search Systems",
+        "Build AI Agents and Workflow Automation",
+        "Build Evaluation, Feedback, and Monitoring Loops",
+        "Applied AI Product Thinking",
+    ]
+
+    created = []
+    for title in outcomes:
+        response = client.post("/outcomes", json={
+            "job_id": job_id,
+            "title": title,
+            "description": f"Candidate can demonstrate: {title}",
+            "company": "ClickPost",
+            "location": "Bangalore",
+            "category": "Software Engineering",
+            "job_type": "Internship",
+            "save_as_template": True,
+            "tasks": [
+                {"name": f"{title} signal one", "priority": "High", "weight": 0.6},
+                {"name": f"{title} signal two", "priority": "Medium", "weight": 0.4},
+            ],
+        })
+        assert response.status_code == 200
+        body = response.json()
+        assert body["job_id"] == job_id
+        assert body["is_template"] == 0
+        assert body["source_template_id"]
+        assert len(body["tasks"]) == 2
+        created.append(body)
+
+    job_outcomes_resp = client.get(f"/jobs/{job_id}/outcomes")
+    assert job_outcomes_resp.status_code == 200
+    assert len(job_outcomes_resp.json()) == len(outcomes)
+
+    templates_resp = client.get("/outcomes/templates")
+    assert templates_resp.status_code == 200
+    template_ids = {item["source_template_id"] for item in created}
+    saved_templates = [
+        item for item in templates_resp.json()
+        if item["id"] in template_ids
+    ]
+    assert len(saved_templates) == len(outcomes)
+    assert all(item["job_id"] is None for item in saved_templates)

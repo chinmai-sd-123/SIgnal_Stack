@@ -256,7 +256,7 @@ export default function JobDetail() {
         setEvaluationMessage('Starting evaluation...');
         try {
             const result = await queueJobEvaluation(jobId, {
-                deep_limit: 100,
+                deep_limit: 25,
                 include_deep_evaluation: true,
             });
             setEvaluationMessage(result.message || 'Evaluation queued');
@@ -307,6 +307,9 @@ export default function JobDetail() {
     const getProgressStatusCount = (status) => Math.max(
         Number(progress.submission_status_counts?.[status] || 0),
         Number(progress.candidate_status_counts?.[status] || 0),
+    );
+    const getOutcomeReportStatus = (outcomeId) => (
+        progress.outcome_statuses?.find((item) => item.outcome_id === outcomeId)
     );
     const totalInviteSubmissions = invites.reduce((count, inv) => count + (inv.submissions?.length || 0), 0);
 
@@ -514,19 +517,33 @@ export default function JobDetail() {
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 gap-4">
-                        {outcomes.map((outcome) => (
+                        {outcomes.map((outcome) => {
+                            const reportStatus = getOutcomeReportStatus(outcome.id);
+                            const hasReport = reportStatus?.status === 'evaluated';
+                            const primaryPath = hasReport ? `/evaluation/${outcome.id}` : `/dashboard/${outcome.id}`;
+
+                            return (
                             <div
                                 key={outcome.id}
                                 className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:border-primary transition-colors"
                             >
                                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
-                                    <Link to={`/dashboard/${outcome.id}`} className="min-w-0 flex-1">
+                                    <Link to={primaryPath} className="min-w-0 flex-1">
                                         <h3 className="text-lg font-semibold text-gray-900 group-hover:text-primary">
                                             {outcome.title}
                                         </h3>
                                         <p className="text-gray-500 mt-1 line-clamp-2">{outcome.description}</p>
                                     </Link>
                                     <div className="flex items-center gap-2 flex-shrink-0">
+                                        {hasReport && (
+                                            <Link
+                                                to={`/evaluation/${outcome.id}`}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 text-green-700 border border-green-100 text-xs font-semibold hover:bg-green-100"
+                                            >
+                                                <FileText className="w-3.5 h-3.5" />
+                                                Report
+                                            </Link>
+                                        )}
                                         <Link
                                             to={`/outcomes/${outcome.id}/edit`}
                                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-xs font-semibold hover:bg-gray-200"
@@ -542,7 +559,7 @@ export default function JobDetail() {
                                             <Trash2 className="w-3.5 h-3.5" />
                                             Delete
                                         </button>
-                                        <Link to={`/dashboard/${outcome.id}`} className="bg-primary-soft p-2 rounded-full text-primary">
+                                        <Link to={primaryPath} className="bg-primary-soft p-2 rounded-full text-primary">
                                             <ChevronRight className="w-5 h-5" />
                                         </Link>
                                     </div>
@@ -556,9 +573,15 @@ export default function JobDetail() {
                                         }`}>
                                         {outcome.status}
                                     </span>
+                                    {hasReport && (
+                                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-100">
+                                            Report ready{reportStatus.report_candidate_count ? ` - ${reportStatus.report_candidate_count} candidates` : ''}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>

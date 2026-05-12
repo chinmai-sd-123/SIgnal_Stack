@@ -96,7 +96,7 @@ def seed_candidates(job_id: str, count: int, queue_after: bool = False) -> dict:
         if queue_after and created_submissions:
             task_id = queue_job_evaluation(
                 job_id,
-                deep_limit=min(100, count),
+                deep_limit=min(25, count),
                 include_deep_evaluation=True,
             )
 

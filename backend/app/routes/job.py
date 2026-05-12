@@ -212,7 +212,7 @@ def queue_job_applications_for_evaluation(
         raise HTTPException(status_code=404, detail="Job not found")
 
     options = options or {}
-    deep_limit = int(options.get("deep_limit", 100))
+    deep_limit = int(options.get("deep_limit", 25))
     candidate_limit = options.get("candidate_limit")
     include_deep_evaluation = bool(options.get("include_deep_evaluation", True))
     rerun_evaluated = bool(options.get("rerun_evaluated", False))
@@ -230,13 +230,19 @@ def queue_job_applications_for_evaluation(
         progress = get_job_evaluation_progress(db, job_id)
 
     if has_running_job_evaluation(progress) and not rerun_evaluated:
+        queued_count = mark_job_submissions_queued(
+            db,
+            job_id,
+            retry_failed_only=retry_failed_only,
+        )
+        progress = get_job_evaluation_progress(db, job_id)
         return {
             "job_id": job_id,
             "task_id": None,
-            "queued_count": 0,
+            "queued_count": queued_count,
             "deep_limit": max(0, deep_limit),
             "include_deep_evaluation": include_deep_evaluation,
-            "message": "Job evaluation is already queued or running",
+            "message": "Job evaluation is already queued or running; new submissions were added to the active job queue",
             "progress": progress,
         }
 

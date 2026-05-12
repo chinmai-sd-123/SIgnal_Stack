@@ -287,6 +287,12 @@ class SignalExtractor:
         try:
             from app.pipeline.evidence_selector import priority_files, extract_snippets
             ranked = priority_files(files, max_files=25, keywords=merged_keywords)
+            ranked = self._boost_ranked_files_with_content(
+                repo_url=repo_url,
+                files=files,
+                ranked=ranked,
+                keywords=merged_keywords,
+            )
             use_selector = bool(ranked)
         except Exception:
             ranked = []
@@ -592,9 +598,10 @@ class SignalExtractor:
         task_stopwords = {
             "build", "create", "implement", "add", "with", "using", "backend",
             "frontend", "system", "service", "project", "application", "driven",
+            "candidate", "outcome", "description", "signal", "code", "can",
         }
         title_tokens = [
-            token for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_/-]{2,}", title_lower)
+            token for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_]{2,}", title_lower)
             if token not in task_stopwords
         ]
         token_aliases = {
@@ -604,6 +611,14 @@ class SignalExtractor:
             "migrations": ["migration"],
             "deployment": ["deploy"],
             "retrieval": ["retrieve"],
+            "openai": ["llm", "ai", "api_key", "OPENAI_API_KEY", "responses.create", "chat.completions"],
+            "claude": ["anthropic", "ANTHROPIC_API_KEY"],
+            "anthropic": ["claude", "ANTHROPIC_API_KEY"],
+            "gemini": ["google", "genai", "google-generativeai", "GEMINI_API_KEY", "generate_content"],
+            "credentials": ["api_key", "config", "settings", "env"],
+            "credential": ["api_key", "config", "settings", "env"],
+            "configurable": ["config", "settings", "env"],
+            "client": ["client", "OpenAI", "Anthropic"],
         }
         collected.extend(title_tokens)
         for token in title_tokens:
@@ -651,6 +666,14 @@ class SignalExtractor:
                 ["def test_", "assert", "expect", "describe", "it(",
                  "pytest", "jest", "mocha", "@Test"],
             ),
+            (
+                ["openai", "claude", "anthropic", "gemini", "llm", "ai api", "api key",
+                 "credentials", "prompt", "rag", "agent"],
+                ["OpenAI", "openai", "responses.create", "chat.completions",
+                 "anthropic", "Anthropic", "google.generativeai", "google-generativeai",
+                 "genai", "Gemini", "generate_content", "api_key", "OPENAI_API_KEY",
+                 "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "LLM", "prompt"],
+            ),
         ]
 
         for triggers, keywords in KEYWORD_BUCKETS:
@@ -672,6 +695,82 @@ class SignalExtractor:
             result = words + ["def ", "class ", "function ", "export ", "import "]
 
         return result[:20]
+
+    def _boost_ranked_files_with_content(self, repo_url: str, files: List[str], ranked: List, keywords: List[str]) -> List:
+        """
+        Promote files whose contents directly match task keywords.
+
+        Path-only ranking is fast but can miss provider integrations living in
+        generic modules like services/llm.py. This targeted scan checks likely
+        source/config files and then merges strong content hits ahead of generic
+        models, seeds, or helper scripts.
+        """
+        from app.pipeline.evidence_selector import PriorityFile, score_content_relevance
+
+        keyword_set = {kw.lower().strip() for kw in keywords if kw}
+        provider_terms = {
+            "openai", "claude", "anthropic", "gemini", "llm", "genai",
+            "google-generativeai", "api_key", "credentials", "openai_api_key",
+            "anthropic_api_key", "gemini_api_key",
+        }
+        provider_task = bool(keyword_set & provider_terms)
+        code_exts = (".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java")
+        manifest_names = {"requirements.txt", "pyproject.toml", "package.json", ".env.example"}
+        path_hints = (
+            "llm", "openai", "anthropic", "claude", "gemini", "genai",
+            "prompt", "config", "settings", "secrets", "service",
+        )
+
+        def is_noise(path: str) -> bool:
+            lower = path.lower()
+            return any(
+                noise in lower
+                for noise in ("node_modules/", "dist/", "build/", "vendor/", "__pycache__/", ".git/")
+            )
+
+        candidates: List[str] = []
+        for path in files:
+            lower = path.lower()
+            filename = lower.split("/")[-1]
+            if is_noise(path):
+                continue
+            is_source = lower.endswith(code_exts)
+            is_manifest = filename in manifest_names
+            if not (is_source or is_manifest):
+                continue
+            if provider_task and not (is_manifest or any(hint in lower for hint in path_hints)):
+                continue
+            candidates.append(path)
+
+        if not provider_task:
+            ranked_paths = [item.path for item in ranked[:20]]
+            generic_candidates = [
+                path for path in files
+                if path not in ranked_paths
+                and path.lower().endswith(code_exts)
+                and not is_noise(path)
+            ][:20]
+            candidates = list(dict.fromkeys(ranked_paths + generic_candidates))
+
+        boosted = {}
+        for path in candidates[:40]:
+            content = self.github.get_file_content(repo_url, path)
+            score = score_content_relevance(path, content, keywords)
+            if score <= 0:
+                continue
+            boosted[path] = PriorityFile(
+                path=path,
+                priority=150 + min(score, 60),
+                category="task_specific",
+            )
+
+        merged = {item.path: item for item in ranked}
+        for path, item in boosted.items():
+            current = merged.get(path)
+            if not current or item.priority > current.priority:
+                merged[path] = item
+
+        return sorted(merged.values(), key=lambda item: item.priority, reverse=True)
 
     def _get_priority_files(self, files: List[str], task_title: str) -> List[str]:
         """Return files most likely to contain task implementation (fallback path)."""

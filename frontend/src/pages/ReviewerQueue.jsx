@@ -308,8 +308,6 @@ export default function ReviewerQueue() {
                         const failedCount = statusCount(progress, 'failed');
                         const readyReports = evaluatedOutcomes(progress);
                         const pendingOutcomes = (progress?.outcome_statuses || []).filter((outcome) => outcome.status !== 'evaluated');
-                        const firstReport = readyReports[0];
-
                         return (
                             <div
                                 key={job.id}
@@ -474,7 +472,7 @@ export default function ReviewerQueue() {
                                                 state={{ anonymized }}
                                                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200"
                                             >
-                                                {firstReport ? 'View Report List' : 'View Outcomes'}
+                                                View Outcomes
                                                 <ChevronRight className="w-4 h-4" />
                                             </Link>
                                         </div>

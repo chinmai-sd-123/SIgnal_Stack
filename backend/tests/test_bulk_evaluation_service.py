@@ -1,8 +1,17 @@
 import pytest
+from datetime import timedelta
 
+import app.schemas as schemas
+from app.models.evaluation import Evaluation
 from app.models.invite import InviteSubmission
+from app.models.invite import Invite
+from app.models.job import Job
 from app.models.job_candidate import JobCandidate
+from app.models.outcome import Outcome
+from app.models.proof import Proof
+from app.models.task import Task
 from app.services import bulk_evaluation_service as bulk
+from app.utils.time_utils import utc_now
 
 
 class _FakeCandidateQuery:
@@ -171,6 +180,115 @@ class _FakeRedis:
         return items[start:end + 1]
 
 
+class _NoCloseSession:
+    def __init__(self, session):
+        self.session = session
+
+    def __getattr__(self, name):
+        return getattr(self.session, name)
+
+    def close(self):
+        pass
+
+
+class _FakeExtractor:
+    def extract_signals(self, proof):
+        return {
+            "authorship_fraction": 1.0,
+            "readme_quality_score": 1.0,
+            "tests_present": 1.0,
+            "commit_count": 3,
+            "repo_url": proof.payload.get("repo_url", ""),
+        }
+
+
+class _FakeEvaluator:
+    def evaluate(self, outcome, proofs, signals_map):
+        summaries = []
+        for index, proof in enumerate(proofs):
+            score = round(max(0.1, 0.9 - index * 0.05), 2)
+            summaries.append(schemas.CandidateSummary(
+                candidate_id=proof.candidate_id,
+                overall_score=score,
+                capability_score=score,
+                evidence_confidence=0.8,
+                production_readiness=0.7,
+                verification_status="verified",
+                tasks_won=1 if index == 0 else 0,
+                dimensions={
+                    "project_completion": score,
+                    "engineering_quality": score,
+                    "communication": 0.7,
+                    "innovation": 0.6,
+                    "depth_novelty": 0.6,
+                },
+                confidence_rating="High",
+                risk_flags=[],
+            ))
+
+        top_candidates = [
+            schemas.CandidateScore(
+                candidate_id=summary.candidate_id,
+                score=summary.overall_score,
+                justification="Test evaluator score",
+                evidence=[],
+            )
+            for summary in summaries
+        ]
+        return schemas.EvaluationResponse(
+            job_id=outcome.id,
+            job_title=outcome.title,
+            fit_score=summaries[0].overall_score if summaries else 0.0,
+            capability_score=summaries[0].capability_score if summaries else 0.0,
+            evidence_confidence=0.8 if summaries else 0.0,
+            production_readiness=0.7 if summaries else 0.0,
+            verification_status="verified" if summaries else "unverified",
+            work_allocation=[
+                schemas.WorkAllocation(
+                    task_id=outcome.tasks[0].id,
+                    task_title=outcome.tasks[0].name,
+                    recommended_candidate=summaries[0].candidate_id if summaries else "None",
+                    confidence=summaries[0].overall_score if summaries else 0.0,
+                    reasons=["Test allocation"],
+                    evidence=[],
+                    top_candidates=top_candidates,
+                )
+            ],
+            global_signals_used=["readme_quality_score", "tests_present"],
+            risk_flags=[],
+            human_action_required=True,
+            dimensions=summaries[0].dimensions if summaries else None,
+            candidate_summaries=summaries,
+        )
+
+
+def _add_submission_with_proofs(db, invite, job_id, outcomes, candidate_id, status="submitted"):
+    submission = InviteSubmission(
+        id=f"sub-{candidate_id}",
+        invite_id=invite.id,
+        job_id=job_id,
+        candidate_name=candidate_id.title(),
+        candidate_email=f"{candidate_id}@example.com",
+        github_username=candidate_id,
+        repo_url=f"https://github.com/acme/{candidate_id}",
+        status=status,
+    )
+    db.add(submission)
+    for outcome in outcomes:
+        db.add(Proof(
+            outcome_id=outcome.id,
+            candidate_id=candidate_id,
+            type="github",
+            payload_json={
+                "repo_url": submission.repo_url,
+                "github_username": candidate_id,
+                "invite_submission_id": submission.id,
+            },
+        ))
+    db.commit()
+    return submission
+
+
 @pytest.mark.unit
 def test_ensure_job_candidate_moves_queued_candidate_to_evaluating():
     candidate = JobCandidate(
@@ -330,3 +448,112 @@ def test_deep_evaluation_plan_includes_all_previously_evaluated_candidates():
     assert candidate_ids == ["old", "new"]
     assert signals["old"] == {"tests_present": 1}
     assert signals["new"] == {"commit_count": 1}
+
+
+@pytest.mark.integration
+def test_staged_job_evaluation_refreshes_reports_with_later_candidates(db_session, monkeypatch):
+    job_id = "job-staged-eval"
+    outcomes = [
+        Outcome(
+            id="outcome-staged-1",
+            job_id=job_id,
+            title="Build AI workflow",
+            description="Candidate can build a useful AI workflow.",
+            version=1,
+            status="active",
+        ),
+        Outcome(
+            id="outcome-staged-2",
+            job_id=job_id,
+            title="Ship backend service",
+            description="Candidate can expose the AI workflow through reliable APIs.",
+            version=1,
+            status="active",
+        ),
+    ]
+    job = Job(
+        id=job_id,
+        title="AI Engineer Intern",
+        description="Evaluate staged candidates reliably.",
+        company="SignalStack",
+        location="Remote",
+        status="active",
+    )
+    invite = Invite(
+        id="invite-staged",
+        token="token-staged",
+        job_id=job_id,
+        status="active",
+        expires_at=utc_now() + timedelta(days=7),
+    )
+    db_session.add(job)
+    db_session.add_all(outcomes)
+    db_session.add_all([
+        Task(
+            id="task-staged-1",
+            outcome_id="outcome-staged-1",
+            name="Build review flow",
+            priority="High",
+            weight=1.0,
+            version=1,
+        ),
+        Task(
+            id="task-staged-2",
+            outcome_id="outcome-staged-2",
+            name="Expose API",
+            priority="High",
+            weight=1.0,
+            version=1,
+        ),
+    ])
+    db_session.add(invite)
+    db_session.commit()
+
+    monkeypatch.setattr(bulk, "SessionLocal", lambda: _NoCloseSession(db_session))
+    monkeypatch.setattr(bulk, "SignalExtractor", _FakeExtractor)
+    monkeypatch.setattr(bulk, "Evaluator", _FakeEvaluator)
+
+    _add_submission_with_proofs(db_session, invite, job_id, outcomes, "cand-a")
+    _add_submission_with_proofs(db_session, invite, job_id, outcomes, "cand-b")
+
+    first_result = bulk.evaluate_job_applications_sync(job_id)
+
+    assert first_result["evaluated"] == 2
+    assert first_result["evaluations_created"] == 2
+    for outcome in outcomes:
+        latest = db_session.query(Evaluation).filter(
+            Evaluation.outcome_id == outcome.id,
+        ).order_by(Evaluation.created_at.desc()).first()
+        candidate_ids = {
+            item["candidate_id"]
+            for item in latest.evaluation_json["candidate_summaries"]
+        }
+        assert candidate_ids == {"cand-a", "cand-b"}
+
+    _add_submission_with_proofs(db_session, invite, job_id, outcomes, "cand-c")
+
+    second_result = bulk.evaluate_job_applications_sync(job_id)
+
+    assert second_result["evaluated"] == 1
+    assert second_result["deep_evaluated_candidates"] == 3
+    assert second_result["evaluations_created"] == 2
+    progress = bulk.get_job_evaluation_progress(db_session, job_id)
+    assert progress["evaluated_count"] == 3
+    assert progress["outcomes_evaluated"] == 2
+
+    for outcome in outcomes:
+        latest = db_session.query(Evaluation).filter(
+            Evaluation.outcome_id == outcome.id,
+        ).order_by(Evaluation.created_at.desc()).first()
+        candidate_ids = {
+            item["candidate_id"]
+            for item in latest.evaluation_json["candidate_summaries"]
+        }
+        assert candidate_ids == {"cand-a", "cand-b", "cand-c"}
+
+        status = next(
+            item for item in progress["outcome_statuses"]
+            if item["outcome_id"] == outcome.id
+        )
+        assert status["latest_evaluation_id"] == latest.id
+        assert status["report_candidate_count"] == 3

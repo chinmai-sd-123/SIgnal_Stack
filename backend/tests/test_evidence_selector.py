@@ -1,6 +1,39 @@
 import pytest
 
-from app.pipeline.evidence_selector import extract_snippets, priority_files
+from app.pipeline.evidence_selector import extract_snippets, priority_files, score_content_relevance
+from app.pipeline.signal_extractor import SignalExtractor
+
+
+class _FakeGithubForEvidence:
+    files = [
+        "backend/app/models/job_candidate.py",
+        "backend/app/services/leetcode.py",
+        "backend/app/services/llm.py",
+        "backend/app/config/config.py",
+        "backend/requirements.txt",
+        "README.md",
+    ]
+    contents = {
+        "backend/app/models/job_candidate.py": "class JobCandidate: pass",
+        "backend/app/services/leetcode.py": "class LeetCodeService:\n    GRAPHQL_URL = 'https://leetcode.com/graphql'",
+        "backend/app/services/llm.py": (
+            "from openai import OpenAI\n\n"
+            "class OpenAILLMService:\n"
+            "    def __init__(self, settings):\n"
+            "        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)\n"
+            "    def generate(self, prompt):\n"
+            "        return self.client.responses.create(model=self.model, input=prompt)\n"
+        ),
+        "backend/app/config/config.py": "OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')",
+        "backend/requirements.txt": "openai>=2.0.0",
+        "README.md": "SignalStack",
+    }
+
+    def get_recursive_tree(self, repo_url):
+        return self.files, "main"
+
+    def get_file_content(self, repo_url, path):
+        return self.contents.get(path, "")
 
 
 @pytest.mark.unit
@@ -90,3 +123,82 @@ def test_small_project_source_files_are_not_dropped():
     assert "app/github.py" in paths
     assert "app/security.py" in paths
     assert "app/__init__.py" not in paths
+
+
+@pytest.mark.unit
+def test_ai_provider_keywords_prioritize_llm_files_over_generic_models():
+    files = [
+        "backend/app/models/job_candidate.py",
+        "backend/app/models/outcome.py",
+        "backend/app/services/leetcode.py",
+        "backend/app/services/llm.py",
+        "backend/app/config/config.py",
+        "backend/seed_eval_candidates.py",
+        "backend/requirements.txt",
+    ]
+    keywords = [
+        "openai", "claude", "gemini", "llm", "api_key",
+        "credentials", "client",
+    ]
+
+    ranked = priority_files(files, keywords=keywords, max_files=5)
+    paths = [item.path for item in ranked]
+
+    assert paths[0] == "backend/app/services/llm.py"
+    assert "backend/app/models/job_candidate.py" not in paths[:3]
+    assert "backend/app/models/outcome.py" not in paths[:3]
+
+
+@pytest.mark.unit
+def test_content_relevance_detects_openai_client_usage():
+    content = """
+from openai import OpenAI
+
+client = OpenAI(api_key=settings.OPENAI_API_KEY)
+response = client.responses.create(model=model, input=prompt)
+"""
+
+    score = score_content_relevance(
+        "backend/app/services/llm.py",
+        content,
+        ["openai", "api_key", "client", "responses.create"],
+    )
+
+    assert score >= 30
+
+
+@pytest.mark.unit
+def test_task_context_extracts_ai_provider_keywords_from_slash_separated_signal():
+    extractor = SignalExtractor()
+    task_context = """
+Outcome: Productionize AI Backend Services
+Outcome Description: Candidate can convert an AI prototype into a backend API.
+Signal: Code integrating OpenAI/Claude/Gemini API calls with configurable credentials and client usage
+"""
+
+    keywords = {item.lower() for item in extractor._get_evidence_keywords(task_context)}
+
+    assert {"openai", "claude", "gemini", "llm", "api_key"} <= keywords
+    assert "candidate" not in keywords
+    assert "outcome" not in keywords
+
+
+@pytest.mark.unit
+def test_extract_evidence_promotes_actual_openai_client_file():
+    extractor = SignalExtractor()
+    extractor.github = _FakeGithubForEvidence()
+    task_context = """
+Outcome: Productionize AI Backend Services
+Outcome Description: Candidate can convert an AI prototype into a working backend service.
+Signal: Code integrating OpenAI/Claude/Gemini API calls with configurable credentials and client usage
+"""
+
+    evidence = extractor.extract_evidence(
+        repo_url="https://github.com/chinmai-sd-123/SIgnal_Stack",
+        task_title=task_context,
+    )
+    code_refs = [item.ref for item in evidence if item.type == "code_snippet"]
+
+    assert code_refs[0] == "FILE:backend/app/services/llm.py"
+    assert "OpenAI(api_key=settings.OPENAI_API_KEY)" in evidence[0].snippet
+    assert "responses.create" in evidence[0].snippet

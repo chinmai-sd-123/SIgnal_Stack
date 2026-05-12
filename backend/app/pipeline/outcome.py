@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 import app.models as models
 import app.schemas as schemas
 from app.config.config import config
@@ -39,7 +39,7 @@ class OutcomePipeline:
             
             # Master templates are reusable across jobs, so they intentionally
             # have no job_id. Using a sentinel id breaks the outcomes -> jobs FK.
-            master_template = crud.create_outcome(self.db, template_create, job_id=None)
+            master_template = crud.create_outcome(self.db, template_create, job_id=None, commit=False)
             
             # 2. Now Create the Instance linked to this new template
             # We use the instantiation logic to ensure consistency
@@ -47,7 +47,8 @@ class OutcomePipeline:
             db_outcome = service_crud.instantiate_outcome_from_template(
                 self.db, 
                 template_id=master_template.id, 
-                target_job_id=outcome.job_id
+                target_job_id=outcome.job_id,
+                commit=False,
             )
             
             # Update SEO fields for the instance since instantiation doesn't do it
@@ -59,8 +60,7 @@ class OutcomePipeline:
             db_outcome.public_url = public_url
             self.db.add(db_outcome)
             self.db.commit()
-            
-            return db_outcome
+            return self._load_response_outcome(db_outcome.id)
 
         # 4. Create in DB via CRUD (Standard path)
         db_outcome = crud.create_outcome(
@@ -77,10 +77,18 @@ class OutcomePipeline:
             public_url=public_url
         )
         
-        return db_outcome
+        return self._load_response_outcome(db_outcome.id)
 
     def get_outcome(self, outcome_id: str) -> Optional[models.Outcome]:
         return crud.get_outcome(self.db, outcome_id)
 
     def get_outcome_by_slug(self, slug: str) -> Optional[models.Outcome]:
         return crud.get_outcome_by_slug(self.db, slug)
+
+    def _load_response_outcome(self, outcome_id: str) -> models.Outcome:
+        return (
+            self.db.query(models.Outcome)
+            .options(selectinload(models.Outcome.tasks))
+            .filter(models.Outcome.id == outcome_id)
+            .first()
+        )

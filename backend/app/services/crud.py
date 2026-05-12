@@ -22,7 +22,13 @@ def get_outcomes(db: Session, category: str = None):
         query = query.filter(models.Outcome.category.ilike(f"%{category.replace('-', ' ')}%"))
     return query.all()
 
-def create_outcome(db: Session, outcome: schemas.OutcomeCreate, job_id: str = None, **kwargs) -> models.Outcome:
+def create_outcome(
+    db: Session,
+    outcome: schemas.OutcomeCreate,
+    job_id: str = None,
+    commit: bool = True,
+    **kwargs,
+) -> models.Outcome:
     # Check if is_template request
     is_template = getattr(outcome, "is_template", 0)
     
@@ -36,7 +42,10 @@ def create_outcome(db: Session, outcome: schemas.OutcomeCreate, job_id: str = No
         **kwargs
     )
     db.add(db_outcome)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(db_outcome)
 
     for task in outcome.tasks:
@@ -49,8 +58,12 @@ def create_outcome(db: Session, outcome: schemas.OutcomeCreate, job_id: str = No
             version=1
         )
         db.add(db_task)
-    
-    db.commit()
+
+    if commit:
+        db.commit()
+        db.refresh(db_outcome)
+    else:
+        db.flush()
     return db_outcome
 
 def update_outcome(db: Session, outcome_id: str, payload: schemas.OutcomeUpdate) -> models.Outcome:
@@ -110,7 +123,12 @@ def delete_outcome(db: Session, outcome_id: str) -> bool:
     db.commit()
     return True
 
-def instantiate_outcome_from_template(db: Session, template_id: str, target_job_id: str) -> models.Outcome:
+def instantiate_outcome_from_template(
+    db: Session,
+    template_id: str,
+    target_job_id: str,
+    commit: bool = True,
+) -> models.Outcome:
     """
     Creates a new Outcome instance from a Master Template.
     Deep copies the outcome and all its trained tasks.
@@ -151,7 +169,11 @@ def instantiate_outcome_from_template(db: Session, template_id: str, target_job_
         )
         db.add(new_task)
 
-    db.commit()
+    if commit:
+        db.commit()
+        db.refresh(new_outcome)
+    else:
+        db.flush()
     return new_outcome
 
 def get_outcome_templates(db: Session):
@@ -225,8 +247,12 @@ def create_evaluation(db: Session, evaluation: schemas.EvaluationResponse):
     db_eval = models.Evaluation(
         job_id=evaluation.job_id,
         outcome_id=evaluation.job_id,
+        status="completed",
         evaluation_json=evaluation.model_dump(),
-        fit_score=evaluation.fit_score
+        fit_score=evaluation.fit_score,
+        work_allocation=[item.model_dump() for item in evaluation.work_allocation],
+        confidence=evaluation.evidence_confidence,
+        risk_flags=evaluation.risk_flags,
     )
     db.add(db_eval)
     db.commit()

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import List
 import time
@@ -53,7 +54,10 @@ def get_status(job_id: str, db: Session = Depends(get_db)):
     # Return the LATEST evaluation for this outcome (most recent run)
     # Note: job_id in evaluation context is actually outcome_id
     eval_db = db.query(models.Evaluation).filter(
-        models.Evaluation.job_id == job_id
+        or_(
+            models.Evaluation.job_id == job_id,
+            models.Evaluation.outcome_id == job_id,
+        )
     ).order_by(models.Evaluation.created_at.desc()).first()
     
     # Get outcome title (job_id is actually outcome_id in this context)
