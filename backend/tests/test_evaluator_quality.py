@@ -1,5 +1,6 @@
 import pytest
 
+import app.schemas as schemas
 from app.pipeline.evaluator import (
     _accumulate_dimensions,
     _average_dimension_accumulator,
@@ -120,3 +121,100 @@ def test_task_context_includes_outcome_and_signal_text():
     assert "Outcome: AI Health Monitoring" in context
     assert "Outcome Description: Evaluate health risk prediction projects" in context
     assert "Signal: Train baseline model and report F1 score" in context
+
+
+@pytest.mark.unit
+def test_batched_evaluator_uses_one_llm_call_per_candidate_outcome(monkeypatch):
+    calls = []
+
+    class Outcome:
+        id = "outcome-1"
+        job_id = "job-1"
+        title = "Build AI workflow"
+        description = "Candidate can ship an AI workflow."
+
+    class Task:
+        def __init__(self, task_id, name):
+            self.id = task_id
+            self.name = name
+            self.priority = "High"
+            self.weight = 0.5
+
+    outcome = Outcome()
+    outcome.tasks = [
+        Task("task-1", "Send code to an LLM service"),
+        Task("task-2", "Render review feedback to the user"),
+    ]
+
+    class FakeExtractor:
+        def extract_evidence(self, **kwargs):
+            return [
+                Evidence(
+                    type="code_snippet",
+                    ref="FILE:app/main.py",
+                    snippet="def review_code(code):\n    return llm.review(code)",
+                )
+            ]
+
+        def extract_authorship_signals(self, *args, **kwargs):
+            return Evidence(
+                type="authorship_context",
+                ref="AUTHORSHIP",
+                snippet="Authorship confirmed.",
+            )
+
+    class FakeLLM:
+        def interpret_outcome_signals(self, outcome_description, task_evidence, payload=None, tracking_context=None):
+            calls.append({
+                "outcome_description": outcome_description,
+                "task_evidence": task_evidence,
+                "tracking_context": tracking_context,
+            })
+            return {
+                item["task_id"]: {
+                    "strength": 0.7,
+                    "justification": f"Relevant implementation for {item['task_name']}",
+                    "relevant_evidence": "FILE:app/main.py\nreview_code",
+                    "dimensions": {
+                        "project_completion": 7,
+                        "engineering_quality": 7,
+                        "communication": 6,
+                        "innovation": 6,
+                        "depth_novelty": 6,
+                    },
+                }
+                for item in task_evidence
+            }
+
+    monkeypatch.setattr("app.services.llm.OpenAILLMService", lambda: FakeLLM())
+
+    evaluator = Evaluator()
+    evaluator.extractor = FakeExtractor()
+    proof = schemas.ProofCreate(
+        job_id="outcome-1",
+        candidate_id="candidate@example.com",
+        type="github",
+        payload={
+            "repo_url": "https://github.com/acme/reviewer",
+            "candidate_email": "candidate@example.com",
+        },
+    )
+
+    result = evaluator.evaluate_batched(
+        outcome,
+        [proof],
+        {
+            "candidate@example.com": {
+                "authorship_fraction": 1.0,
+                "tests_present": 1.0,
+                "readme_quality_score": 1.0,
+            }
+        },
+    )
+
+    assert len(calls) == 1
+    assert len(calls[0]["task_evidence"]) == 2
+    assert calls[0]["tracking_context"]["operation"] == "outcome_signal_interpretation"
+    assert len(result.work_allocation) == 2
+    assert result.candidate_summaries[0].candidate_id == "candidate@example.com"
+    assert result.candidate_summaries[0].tasks_won == 2

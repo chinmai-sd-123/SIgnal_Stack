@@ -540,7 +540,10 @@ def _deep_evaluate_top_candidates(
             for candidate_id in candidate_ids
         }
 
-        evaluation = evaluator.evaluate(outcome_schema, proof_schemas, signals_map)
+        if hasattr(evaluator, "evaluate_batched"):
+            evaluation = evaluator.evaluate_batched(outcome_schema, proof_schemas, signals_map)
+        else:
+            evaluation = evaluator.evaluate(outcome_schema, proof_schemas, signals_map)
         crud.create_evaluation(db, evaluation)
         evaluations_created += 1
 

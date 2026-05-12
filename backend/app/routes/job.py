@@ -25,6 +25,9 @@ from app.services.submission_proof_service import sync_job_invite_proofs
 
 router = APIRouter()
 
+DEFAULT_DEEP_EVALUATION_LIMIT = 25
+MAX_DEEP_EVALUATION_LIMIT = 50
+
 
 def _report_refresh_needed(progress: dict) -> bool:
     evaluated_count = int(progress.get("evaluated_count") or 0)
@@ -276,7 +279,8 @@ def queue_job_applications_for_evaluation(
     ensure_job_access(job, current)
 
     options = options or {}
-    deep_limit = int(options.get("deep_limit", 25))
+    requested_deep_limit = int(options.get("deep_limit", DEFAULT_DEEP_EVALUATION_LIMIT))
+    deep_limit = max(0, min(requested_deep_limit, MAX_DEEP_EVALUATION_LIMIT))
     candidate_limit = options.get("candidate_limit")
     include_deep_evaluation = bool(options.get("include_deep_evaluation", True))
     rerun_evaluated = bool(options.get("rerun_evaluated", False))

@@ -134,7 +134,7 @@ class OpenAILLMService:
                     context=tracking_context,
                 )
                 if cache_key:
-                    cache.set_llm_response(cache_key, text, ttl=3600)
+                    cache.set_llm_response(cache_key, text, ttl=config.LLM_RESPONSE_CACHE_TTL_SECONDS)
                 return text
             except Exception as e:
                 latency = time.time() - start
@@ -182,7 +182,12 @@ class OpenAILLMService:
         return self._call_with_retry(prompt)
 
     # ── NEW: structured evidence formatter ──────────────────────────────────
-    def _build_evidence_sections(self, evidence: List[Dict]) -> str:
+    def _build_evidence_sections(
+        self,
+        evidence: List[Dict],
+        code_char_limit: int = 8000,
+        repo_char_limit: int = 3000,
+    ) -> str:
         """
         Format evidence into clearly labelled sections so the LLM can
         distinguish deterministic facts from code from authorship context.
@@ -230,8 +235,8 @@ class OpenAILLMService:
             code_block = "\n---\n".join(sections["CODE_SNIPPETS"])
             parts.append(
                 "=== CODE EVIDENCE ===\n"
-                + code_block[:8000]
-                + ("\n[... truncated ...]" if len(code_block) > 8000 else "")
+                + code_block[:code_char_limit]
+                + ("\n[... truncated ...]" if len(code_block) > code_char_limit else "")
             )
 
         if sections["AUTHORSHIP"]:
@@ -244,8 +249,8 @@ class OpenAILLMService:
             repo_block = "\n---\n".join(sections["REPO_STRUCTURE"])
             parts.append(
                 "=== REPOSITORY STRUCTURE ===\n"
-                + repo_block[:3000]
-                + ("\n[... truncated ...]" if len(repo_block) > 3000 else "")
+                + repo_block[:repo_char_limit]
+                + ("\n[... truncated ...]" if len(repo_block) > repo_char_limit else "")
             )
 
         if sections["WORK_ARTIFACT"]:
@@ -514,6 +519,224 @@ Respond with JSON only. No explanation outside the JSON.
                     "project_completion", "engineering_quality",
                     "communication", "innovation", "depth_novelty"
                 ]},
+            }
+
+    def interpret_outcome_signals(
+        self,
+        outcome_description: str,
+        task_evidence: List[Dict[str, Any]],
+        payload: Dict[str, Any] = None,
+        tracking_context: Dict[str, Any] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Interpret every signal for one candidate/outcome in a single LLM call.
+
+        This is used by high-volume job evaluation. It preserves per-signal
+        scoring and evidence output while reducing calls from
+        candidates x outcomes x signals to candidates x outcomes.
+        """
+        dimension_keys = [
+            "project_completion", "engineering_quality",
+            "communication", "innovation", "depth_novelty",
+        ]
+
+        def empty_result(task_id: str, reason: str = "No interpretation available.") -> Dict[str, Any]:
+            return {
+                "strength": 0.0,
+                "justification": reason,
+                "relevant_evidence": "None",
+                "dimensions": {key: 0.0 for key in dimension_keys},
+            }
+
+        task_evidence = task_evidence or []
+        if not task_evidence:
+            return {}
+
+        if not self.api_key or not self.client:
+            return {
+                str(item.get("task_id")): empty_result(str(item.get("task_id")), "API Key missing.")
+                for item in task_evidence
+            }
+
+        try:
+            leetcode_evidence = None
+            if payload and payload.get("leetcode_username"):
+                username = payload["leetcode_username"]
+                stats = self.leetcode_service.fetch_stats(username)
+                if not stats.get("error"):
+                    leetcode_evidence = {
+                        "type": "leetcode_stats",
+                        "ref": "LEETCODE",
+                        "snippet": (
+                            f"LeetCode Profile: {stats.get('username') or username}\n"
+                            f"Total Solved: {stats.get('total_solved')} "
+                            f"(Easy: {stats.get('easy_solved')}, "
+                            f"Med: {stats.get('medium_solved')}, "
+                            f"Hard: {stats.get('hard_solved')})\n"
+                            f"Acceptance Rate: {stats.get('acceptance_rate')}%\n"
+                            f"Ranking: {stats.get('ranking')}"
+                        ),
+                    }
+
+            task_sections = []
+            effective_evidence_by_task: Dict[str, List[Dict[str, Any]]] = {}
+            code_presence: Dict[str, bool] = {}
+            artifact_presence: Dict[str, bool] = {}
+
+            for index, item in enumerate(task_evidence, start=1):
+                task_id = str(item.get("task_id") or f"task_{index}")
+                evidence = list(item.get("evidence") or [])
+                if leetcode_evidence and not any(e.get("type") == "leetcode_stats" for e in evidence):
+                    evidence.append(leetcode_evidence)
+
+                effective_evidence_by_task[task_id] = evidence
+                code_presence[task_id] = bool(self._source_code_evidence(evidence))
+                artifact_presence[task_id] = any(e.get("type") == "work_artifact" for e in evidence)
+
+                evidence_text = self._build_evidence_sections(
+                    evidence,
+                    code_char_limit=3500,
+                    repo_char_limit=1200,
+                )
+                task_sections.append(
+                    f"--- TASK {index} ---\n"
+                    f"TASK_ID: {task_id}\n"
+                    f"TASK_TITLE: {item.get('task_name') or 'Untitled signal'}\n"
+                    f"TASK_CONTEXT:\n{item.get('task_description') or ''}\n\n"
+                    f"EVIDENCE:\n{evidence_text or 'No evidence provided.'}"
+                )
+
+            prompt = f"""You are a senior software engineer evaluating one candidate repository against multiple signals for a single hiring outcome.
+
+OUTCOME BEING EVALUATED:
+\"\"\"{outcome_description.strip() or "General outcome evaluation"}\"\"\"
+
+For each TASK_ID below, score only that task using only its evidence section.
+Do not borrow implementation evidence from one task to justify another task.
+
+{chr(10).join(task_sections)}
+
+SCORING RULES:
+- 0.0-0.2: No relevant code found, unrelated code, or copied/template boilerplate.
+- 0.2-0.4: Related files exist but implementation is incomplete or incorrect.
+- 0.4-0.6: Partial implementation; core logic is visible but important pieces are missing.
+- 0.6-0.8: Complete implementation with minor gaps such as limited tests or error handling.
+- 0.8-1.0: Full working implementation with strong structure, validation, and verification.
+
+EARLY APPLICATION GUIDANCE:
+- Missing tests, CI, Docker, or deployment should not heavily punish personal projects unless the task explicitly asks for them.
+- Authorship uncertainty is a trust note, not a capability penalty unless there is an explicit conflict.
+- If only README text mentions a feature and no implementation code is present, cap that task at 0.45.
+- If no code evidence exists for a code task, cap that task at 0.2.
+- If is_fork=YES and fork_is_unmodified=YES, cap that task at 0.3.
+
+For every task, relevant_evidence must be a direct quote or source ref from that task's evidence.
+Return JSON only.
+"""
+
+            schema = {
+                "name": "outcome_signal_interpretation",
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["tasks"],
+                    "properties": {
+                        "tasks": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": [
+                                    "task_id", "strength", "justification",
+                                    "relevant_evidence", "dimensions",
+                                ],
+                                "properties": {
+                                    "task_id": {"type": "string"},
+                                    "strength": {"type": "number"},
+                                    "justification": {"type": "string"},
+                                    "relevant_evidence": {"type": "string"},
+                                    "dimensions": {
+                                        "type": "object",
+                                        "additionalProperties": False,
+                                        "required": dimension_keys,
+                                        "properties": {
+                                            "project_completion":  {"type": "number"},
+                                            "engineering_quality": {"type": "number"},
+                                            "communication":       {"type": "number"},
+                                            "innovation":          {"type": "number"},
+                                            "depth_novelty":       {"type": "number"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            }
+
+            text = self._call_with_retry(prompt, schema, tracking_context=tracking_context)
+            parsed = self._parse_json(text)
+            raw_results = parsed.get("tasks", []) if isinstance(parsed, dict) else []
+            results: Dict[str, Dict[str, Any]] = {}
+
+            for item in raw_results:
+                task_id = str(item.get("task_id") or "")
+                if not task_id or task_id not in effective_evidence_by_task:
+                    continue
+
+                evidence = effective_evidence_by_task[task_id]
+                result = {
+                    "strength": max(0.0, min(1.0, float(item.get("strength", 0.0) or 0.0))),
+                    "justification": item.get("justification") or "No justification provided.",
+                    "relevant_evidence": str(item.get("relevant_evidence", "") or "").strip(),
+                    "dimensions": item.get("dimensions") or {},
+                }
+
+                if not code_presence[task_id] and not artifact_presence[task_id]:
+                    result["strength"] = min(result["strength"], 0.2)
+                elif not code_presence[task_id] and artifact_presence[task_id]:
+                    result["strength"] = min(result["strength"], 0.6)
+
+                relevant = result["relevant_evidence"]
+                if not self._is_grounded_relevant_evidence(relevant, evidence):
+                    relevant = self._fallback_relevant_evidence(evidence)
+                if relevant.lower() in {"", "none", "error"} and code_presence[task_id]:
+                    relevant = self._fallback_relevant_evidence(evidence)
+                result["relevant_evidence"] = relevant
+
+                dims = result.setdefault("dimensions", {})
+                raw_dims = []
+                for key in dimension_keys:
+                    try:
+                        raw_dims.append(float(dims.get(key, 0.0)))
+                    except (TypeError, ValueError):
+                        raw_dims.append(0.0)
+                dim_scale = 10.0 if raw_dims and max(raw_dims) <= 1.0 and max(raw_dims) > 0 else 1.0
+                for key, value in zip(dimension_keys, raw_dims):
+                    dims[key] = max(0.0, min(10.0, value * dim_scale))
+
+                heuristic = next(
+                    (e for e in evidence if e.get("type") == "heuristic_context"), None
+                )
+                if heuristic:
+                    snippet = heuristic.get("snippet", "")
+                    if "Is Fork: YES" in snippet and "Fork Is Unmodified: YES" in snippet:
+                        result["strength"] = min(result["strength"], 0.3)
+
+                results[task_id] = result
+
+            for item in task_evidence:
+                task_id = str(item.get("task_id") or "")
+                if task_id and task_id not in results:
+                    results[task_id] = empty_result(task_id)
+
+            return results
+
+        except Exception as e:
+            logger.warning("[LLM] Batched outcome interpretation error: %s", e)
+            return {
+                str(item.get("task_id")): empty_result(str(item.get("task_id")), "Error processing evidence via AI.")
+                for item in task_evidence
             }
 
     def summarize(self, proof: schemas.ProofCreate) -> Dict[str, Any]:

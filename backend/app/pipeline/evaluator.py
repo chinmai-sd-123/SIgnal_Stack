@@ -409,6 +409,293 @@ class Evaluator:
             candidate_summaries=candidate_summaries
         )
 
+    def evaluate_batched(self, outcome: schemas.OutcomeCreate, proofs: List[schemas.ProofCreate], signals_map: Dict[str, Dict]) -> schemas.EvaluationResponse:
+        """
+        High-volume evaluator used by the background job queue.
+
+        It keeps the same response shape as evaluate(), but batches all signals
+        for one candidate/outcome into one LLM call. This reduces deep
+        evaluation from candidates x tasks calls to candidates calls per outcome.
+        """
+        tasks = list(getattr(outcome, "tasks", []) or [])
+        allocations = []
+        global_signals_used = set()
+        candidate_stats = {}
+        task_scores: Dict[str, List[Dict]] = {self._task_key(task, index): [] for index, task in enumerate(tasks)}
+        task_lookup = {self._task_key(task, index): task for index, task in enumerate(tasks)}
+
+        from app.services.llm import OpenAILLMService
+        llm = OpenAILLMService()
+
+        outcome_context = "\n".join([
+            part for part in [
+                f"Outcome: {getattr(outcome, 'title', '')}" if getattr(outcome, "title", None) else "",
+                f"Outcome Description: {getattr(outcome, 'description', '')}" if getattr(outcome, "description", None) else "",
+            ]
+            if part
+        ])
+
+        for proof in proofs:
+            cand_id = proof.candidate_id
+            repo_url = proof.payload.get("repo_url", "")
+            artifact_link = proof.payload.get("artifact_link")
+            context_desc = proof.payload.get("context", "")
+
+            if not repo_url and not artifact_link:
+                logger.debug("Skipping %s - No evidence provided.", cand_id)
+                continue
+
+            if cand_id not in candidate_stats:
+                candidate_stats[cand_id] = {
+                    "total_score": 0.0,
+                    "task_count": 0,
+                    "wins": 0,
+                    "dimensions": None,
+                }
+
+            display_url = repo_url or artifact_link or ""
+            clean_repo_url = display_url.rstrip("/")
+            if clean_repo_url.endswith(".git"):
+                clean_repo_url = clean_repo_url[:-4]
+
+            task_payloads = []
+            task_evidence_by_key: Dict[str, Dict] = {}
+
+            for index, task in enumerate(tasks):
+                task_key = self._task_key(task, index)
+                task_context = self._build_task_context(outcome, task)
+                logger.debug("Extracting batched evidence for %s. Candidate: %s", task.name, cand_id)
+
+                task_evidence = self.extractor.extract_evidence(
+                    repo_url=repo_url,
+                    task_title=task_context,
+                    context=context_desc,
+                    artifact_link=artifact_link,
+                )
+                task_short = task.name[:30].replace(" ", "_") if task.name else "general"
+
+                if repo_url and "github.com" in repo_url:
+                    authorship_evidence = self.extractor.extract_authorship_signals(
+                        repo_url,
+                        cand_id,
+                        task_context,
+                        candidate_info=proof.payload,
+                        cached_author_map=signals_map.get(cand_id, {}).get("_author_map"),
+                    )
+                    task_evidence.append(authorship_evidence)
+
+                    cand_signals = signals_map.get(cand_id, {})
+                    if cand_signals:
+                        sig_snippet = f"Task: {task.name}\n\nProject Health Signals (Phase 1 Analysis):\n"
+                        sig_keys = [
+                            "tests_present", "ci_cd_present", "deployment_ready",
+                            "ml_model_present", "commit_count", "unique_authors",
+                            "recent_activity_score", "is_fork", "fork_is_unmodified",
+                            "readme_quality_score", "rate_limiting_present",
+                        ]
+                        for key in sig_keys:
+                            value = cand_signals.get(key, 0)
+                            signal_value = value.get("value", 0) if isinstance(value, dict) else value
+                            if isinstance(signal_value, (int, float)) and signal_value > 0:
+                                global_signals_used.add(key)
+                            label = key.replace("_", " ").title()
+                            if key in ("commit_count", "unique_authors", "recent_activity_score", "readme_quality_score"):
+                                status = str(round(signal_value, 3)) if isinstance(signal_value, float) else str(signal_value)
+                            else:
+                                status = "YES" if signal_value > 0 else "NO"
+                            sig_snippet += f"- {label}: {status}\n"
+
+                        task_evidence.append(schemas.Evidence(
+                            type="heuristic_context",
+                            ref=f"SCAN:{task_short}",
+                            snippet=sig_snippet,
+                            source_url=f"{clean_repo_url}#signals",
+                        ))
+
+                task_evidence_by_key[task_key] = {
+                    "task": task,
+                    "task_short": task_short,
+                    "clean_repo_url": clean_repo_url,
+                    "evidence": task_evidence,
+                }
+                task_payloads.append({
+                    "task_id": task_key,
+                    "task_name": task.name,
+                    "task_description": task_context,
+                    "evidence": [item.model_dump() for item in task_evidence],
+                })
+
+            interpretations = llm.interpret_outcome_signals(
+                outcome_context,
+                task_payloads,
+                payload=proof.payload,
+                tracking_context={
+                    "candidate_id": cand_id,
+                    "job_id": getattr(outcome, "job_id", None),
+                    "outcome_id": getattr(outcome, "id", None),
+                    "operation": "outcome_signal_interpretation",
+                },
+            )
+
+            for task_key, evidence_meta in task_evidence_by_key.items():
+                task = evidence_meta["task"]
+                task_evidence = evidence_meta["evidence"]
+                task_short = evidence_meta["task_short"]
+                clean_repo_url = evidence_meta["clean_repo_url"]
+                interpretation = interpretations.get(task_key, {})
+
+                signal_strength = interpretation.get("strength", 0.0)
+                justification = interpretation.get("justification", "No justification provided.")
+                relevant_evidence_text = interpretation.get("relevant_evidence", "")
+                dims = interpretation.get("dimensions")
+
+                if relevant_evidence_text and relevant_evidence_text not in ("None", "Error", ""):
+                    task_evidence.insert(0, schemas.Evidence(
+                        type="code_snippet",
+                        ref=f"AI_FINDING:{task_short}",
+                        snippet=f"Key Evidence (AI Analysis):\n{relevant_evidence_text}",
+                        source_url=clean_repo_url if repo_url else None,
+                    ))
+
+                score = self.matcher.calculate_task_score(signal_strength)
+                task_scores.setdefault(task_key, []).append({
+                    "candidate_id": cand_id,
+                    "score": round(score, 2),
+                    "justification": justification,
+                    "evidence": task_evidence,
+                    "dimensions": dims,
+                })
+
+                candidate_stats[cand_id]["total_score"] += score
+                candidate_stats[cand_id]["task_count"] += 1
+                if dims:
+                    candidate_stats[cand_id]["dimensions"] = _accumulate_dimensions(
+                        candidate_stats[cand_id]["dimensions"],
+                        dims,
+                    )
+                if score > 0.5:
+                    global_signals_used.add(f"verified_{(task.name or 'signal').replace(' ', '_').lower()}")
+
+        for index, task in enumerate(tasks):
+            task_key = self._task_key(task, index)
+            scores = task_scores.get(task_key, [])
+            scores.sort(key=lambda item: item["score"], reverse=True)
+
+            best = scores[0] if scores else None
+            best_candidate = best["candidate_id"] if best else None
+            best_score = best["score"] if best else 0.0
+            best_reasons = [best["justification"]] if best else []
+            best_evidence = best.get("evidence", []) if best else []
+
+            if best_candidate and best_candidate in candidate_stats:
+                candidate_stats[best_candidate]["wins"] += 1
+
+            top_candidates = [
+                schemas.CandidateScore(
+                    candidate_id=item["candidate_id"],
+                    score=item["score"],
+                    justification=item["justification"],
+                    evidence=item.get("evidence") or [],
+                )
+                for item in scores[:5]
+            ]
+
+            alloc = self.allocator.create_allocation(
+                task_lookup.get(task_key, task),
+                best_candidate,
+                best_score,
+                best_reasons,
+                best_evidence,
+            )
+            alloc.top_candidates = top_candidates
+            allocations.append(alloc)
+
+        return self._build_evaluation_response(
+            outcome,
+            allocations,
+            candidate_stats,
+            signals_map,
+            global_signals_used,
+        )
+
+    def _task_key(self, task, index: int) -> str:
+        return str(getattr(task, "id", None) or f"task_{index}")
+
+    def _build_evaluation_response(
+        self,
+        outcome,
+        allocations: List[schemas.WorkAllocation],
+        candidate_stats: Dict[str, Dict],
+        signals_map: Dict[str, Dict],
+        global_signals_used,
+    ) -> schemas.EvaluationResponse:
+        total_fit = 0.0
+        total_possible_weight = 0.0
+        all_risk_flags: List[str] = []
+
+        for alloc in allocations:
+            task_obj = next((t for t in outcome.tasks if t.name == alloc.task_title), None)
+            weight = task_obj.weight if task_obj else 0.0
+            total_fit += (alloc.confidence * weight)
+            total_possible_weight += weight
+
+        raw_final = total_fit / total_possible_weight if total_possible_weight > 0 else 0.0
+
+        candidate_summaries = []
+        for cand_id, stats in candidate_stats.items():
+            if stats["task_count"] == 0:
+                continue
+
+            avg_score = stats["total_score"] / stats["task_count"]
+            quality = _candidate_quality(signals_map.get(cand_id, {}), avg_score)
+            candidate_summaries.append(schemas.CandidateSummary(
+                candidate_id=cand_id,
+                overall_score=round(avg_score, 2),
+                capability_score=quality["capability_score"],
+                evidence_confidence=quality["evidence_confidence"],
+                production_readiness=quality["production_readiness"],
+                verification_status=quality["verification_status"],
+                tasks_won=stats["wins"],
+                dimensions=_average_dimension_accumulator(stats["dimensions"]),
+                confidence_rating=quality["confidence_rating"],
+                risk_flags=quality["risk_flags"],
+            ))
+
+        candidate_summaries.sort(key=lambda x: x.overall_score, reverse=True)
+
+        top_candidate_id = candidate_summaries[0].candidate_id if candidate_summaries else None
+        if top_candidate_id and top_candidate_id in signals_map:
+            top_signals = signals_map[top_candidate_id]
+            top_capability = candidate_summaries[0].capability_score or raw_final
+            top_quality = _candidate_quality(top_signals, top_capability)
+            scoring = top_quality["scoring"]
+            all_risk_flags = scoring.risk_flags
+            final_score = round(raw_final * 0.75 + scoring.capped_score * 0.25, 3)
+        else:
+            final_score = round(raw_final, 3)
+            top_quality = {
+                "capability_score": round(raw_final, 2),
+                "evidence_confidence": 0.0,
+                "production_readiness": 0.0,
+                "verification_status": "unverified",
+            }
+
+        return schemas.EvaluationResponse(
+            job_id=outcome.id,
+            job_title=None,
+            fit_score=round(final_score, 2),
+            capability_score=top_quality["capability_score"],
+            evidence_confidence=top_quality["evidence_confidence"],
+            production_readiness=top_quality["production_readiness"],
+            verification_status=top_quality["verification_status"],
+            work_allocation=allocations,
+            global_signals_used=sorted(list(global_signals_used)),
+            risk_flags=sorted(all_risk_flags) if all_risk_flags else [],
+            human_action_required=True,
+            dimensions=_avg_dimensions(candidate_summaries),
+            candidate_summaries=candidate_summaries,
+        )
+
     def _build_task_context(self, outcome, task) -> str:
         """Combine outcome and task text so signal extraction has domain context."""
         parts = []

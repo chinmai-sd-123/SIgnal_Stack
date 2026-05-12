@@ -258,8 +258,9 @@ export default function JobDetail() {
         setQueueingEvaluation(true);
         setEvaluationMessage('Starting evaluation...');
         try {
+            const deepLimit = Math.min(25, totalSubmissions);
             const result = await queueJobEvaluation(jobId, {
-                deep_limit: 25,
+                deep_limit: deepLimit,
                 include_deep_evaluation: true,
             });
             setEvaluationMessage(result.message || 'Evaluation queued');
@@ -320,6 +321,8 @@ export default function JobDetail() {
     const evaluatedCount = Number(progress.evaluated_count || 0);
     const outcomesTotal = Number(progress.outcomes_total || outcomes.length || 0);
     const outcomesEvaluated = Number(progress.outcomes_evaluated || 0);
+    const deepReportLimit = 25;
+    const highVolumeMode = (submissionsTotal || totalInviteSubmissions) > deepReportLimit;
     const progressPercent = submissionsTotal > 0
         ? Math.min(100, Math.round((evaluatedCount / submissionsTotal) * 100))
         : 0;
@@ -473,6 +476,11 @@ export default function JobDetail() {
                             {partialReportCount ? ` - ${partialReportCount} partial report${partialReportCount === 1 ? '' : 's'} available` : ''}
                             {progress.queue_size ? ` - queue: ${progress.queue_size}` : ''}
                         </p>
+                        {highVolumeMode && (
+                            <p className="mt-1 text-xs text-gray-400">
+                                Cost control: every candidate is screened; deep LLM reports are generated for the top {deepReportLimit} candidates.
+                            </p>
+                        )}
                         <div className="mt-4 h-2 rounded-full bg-gray-100 overflow-hidden">
                             <div
                                 className={`h-full rounded-full transition-all duration-500 ${visibleEvaluationActive ? 'bg-indigo-500' : 'bg-primary'}`}

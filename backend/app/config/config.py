@@ -35,6 +35,13 @@ def _env_float(name: str, default: float) -> float:
     return float(raw)
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    return int(raw)
+
+
 class Config:
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -43,6 +50,7 @@ class Config:
     LLM_OUTPUT_COST_PER_1M = _env_float("LLM_OUTPUT_COST_PER_1M", _pricing_default(OPENAI_MODEL, "output"))
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:3000")
     ENABLE_LLM_SUMMARIZATION = os.getenv("ENABLE_LLM_SUMMARIZATION", "true").lower() in ("true", "1", "yes")
+    LLM_RESPONSE_CACHE_TTL_SECONDS = _env_int("LLM_RESPONSE_CACHE_TTL_SECONDS", 86400)
     AUTH_SECRET = os.getenv("AUTH_SECRET") or os.getenv("JWT_SECRET") or "signalstack-dev-auth-secret"
     ADMIN_EMAIL = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
     DEMO_RECRUITER_EMAIL = os.getenv("DEMO_RECRUITER_EMAIL", "demo@signalstack.dev").strip().lower()
