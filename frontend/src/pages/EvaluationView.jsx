@@ -156,25 +156,25 @@ export default function EvaluationView() {
 
     // ... utility functions ...
     const getScoreColor = (score) => {
-        if (score >= 0.7) return 'text-green-600';
-        if (score >= 0.4) return 'text-yellow-600';
-        return 'text-red-600';
+        if (score >= 0.7) return 'text-primary';
+        if (score >= 0.4) return 'text-amber-700';
+        return 'text-rose-700';
     };
 
     const getConfidenceBadge = (rating) => {
         const styles = {
-            'High': 'bg-green-100 text-green-800 border-green-200',
-            'Medium': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-            'Low': 'bg-red-100 text-red-800 border-red-200'
+            'High': 'bg-primary-soft text-primary border-primary/20',
+            'Medium': 'bg-accent-soft text-amber-800 border-accent/25',
+            'Low': 'bg-rose-50 text-rose-700 border-rose-200'
         };
         return styles[rating] || styles['Medium'];
     };
 
     const getVerificationBadge = (status) => {
         const styles = {
-            verified: 'bg-green-100 text-green-800 border-green-200',
-            unverified: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-            conflict: 'bg-red-100 text-red-800 border-red-200',
+            verified: 'bg-primary-soft text-primary border-primary/20',
+            unverified: 'bg-accent-soft text-amber-800 border-accent/25',
+            conflict: 'bg-rose-50 text-rose-700 border-rose-200',
         };
         return styles[status] || styles.unverified;
     };
@@ -487,7 +487,7 @@ export default function EvaluationView() {
                             {fallbackSummaries.map((candidate, idx) => (
                                 <div
                                     key={candidate.candidate_id}
-                                    className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-primary transition-all overflow-hidden flex flex-col min-h-[336px]"
+                                    className="bg-[rgba(255,253,248,0.96)] rounded-xl border border-light-200 shadow-card hover:shadow-hover hover:border-primary/40 transition-all overflow-hidden flex flex-col min-h-[336px]"
                                 >
                                     {/* Rank Badge */}
                                     {idx < 3 && (
@@ -559,7 +559,7 @@ export default function EvaluationView() {
 
                                                 if (isHired) {
                                                     return (
-                                                        <div className="w-full px-4 py-2.5 bg-green-100 text-green-700 border border-green-200 rounded-lg flex items-center justify-center gap-2 font-bold text-sm">
+                                                        <div className="w-full px-4 py-2.5 bg-primary-soft text-primary border border-primary/20 rounded-lg flex items-center justify-center gap-2 font-bold text-sm">
                                                             <CheckCircle className="w-4 h-4" /> HIRED
                                                         </div>
                                                     );
@@ -578,7 +578,7 @@ export default function EvaluationView() {
                                                     <button
                                                         onClick={() => handleAction('hire', candidate.candidate_id)}
                                                         disabled={processing}
-                                                        className="w-full btn bg-green-600 hover:bg-green-700 text-white py-2.5 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                                                        className="w-full btn btn-primary py-2.5 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
                                                     >
                                                         {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle className="w-4 h-4" /> Proceed to Interview</>}
                                                     </button>

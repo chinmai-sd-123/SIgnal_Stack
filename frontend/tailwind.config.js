@@ -15,14 +15,14 @@ export default {
             colors: {
                 // Primary Premium Palette
                 primary: {
-                    DEFAULT: '#0b5f66',
-                    hover: '#0f766e',
-                    soft: '#e6f6f5',
-                    glow: 'rgba(11, 95, 102, 0.32)',
+                    DEFAULT: '#064f54',
+                    hover: '#073f45',
+                    soft: '#e4f2ef',
+                    glow: 'rgba(6, 79, 84, 0.28)',
                 },
                 accent: {
-                    DEFAULT: '#c9a227',
-                    soft: '#f7efd2',
+                    DEFAULT: '#b8964f',
+                    soft: '#f4ecd8',
                 },
                 // Dark Theme Backgrounds
                 dark: {
@@ -33,9 +33,9 @@ export default {
                 },
                 // Light Backgrounds
                 light: {
-                    50: '#f7f5f0',
-                    100: '#f2eee6',
-                    200: '#e6e1d7',
+                    50: '#f8f5ef',
+                    100: '#efe8dc',
+                    200: '#ded4c4',
                 },
                 // Text
                 text: {
@@ -44,9 +44,9 @@ export default {
                     muted: '#94a3b8',
                 },
                 // Status
-                success: '#22C55E',
-                warning: '#F59E0B',
-                error: '#EF4444',
+                success: '#0f8a5f',
+                warning: '#b7791f',
+                error: '#c2413b',
             },
             borderRadius: {
                 '2xl': '16px',
@@ -74,8 +74,8 @@ export default {
                     '100%': { opacity: '1', transform: 'translateY(0)' },
                 },
                 pulseGlow: {
-                    '0%, 100%': { boxShadow: '0 0 20px rgba(67, 56, 202, 0.25)' },
-                    '50%': { boxShadow: '0 0 40px rgba(99, 102, 241, 0.35)' },
+                    '0%, 100%': { boxShadow: '0 0 20px rgba(6, 79, 84, 0.22)' },
+                    '50%': { boxShadow: '0 0 40px rgba(184, 150, 79, 0.28)' },
                 },
                 float: {
                     '0%, 100%': { transform: 'translateY(0)' },
@@ -85,7 +85,7 @@ export default {
             backgroundImage: {
                 'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
                 'gradient-conic': 'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
-                'hero-gradient': 'linear-gradient(135deg, #0b5f66 0%, #0f766e 50%, #c9a227 110%)',
+                'hero-gradient': 'linear-gradient(135deg, #073f45 0%, #064f54 48%, #b8964f 115%)',
             },
         },
     },

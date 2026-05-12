@@ -64,7 +64,7 @@ export default function FeedbackModal({ isOpen, onClose, job, tasks }) {
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
 
                 {/* Header */}
-                <div className="p-6 border-b flex justify-between items-start bg-gradient-to-r from-primary-soft to-purple-50 border-primary-soft">
+                <div className="p-6 border-b flex justify-between items-start bg-gradient-to-r from-primary-soft to-accent-soft border-primary-soft">
                     <div className="flex gap-4">
                         <div className="p-3 rounded-2xl shadow-sm bg-primary-soft text-primary">
                             <Lightbulb className="w-6 h-6" />

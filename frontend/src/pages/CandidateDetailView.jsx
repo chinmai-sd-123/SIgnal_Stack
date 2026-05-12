@@ -65,9 +65,9 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
     });
 
     const getScoreColor = (score) => {
-        if (score >= 0.7) return 'text-green-600';
-        if (score >= 0.4) return 'text-yellow-600';
-        return 'text-red-600';
+        if (score >= 0.7) return 'text-primary';
+        if (score >= 0.4) return 'text-amber-700';
+        return 'text-rose-700';
     };
 
     const getTaskMatchLabel = (score, isWinner) => {
@@ -79,18 +79,18 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
 
     const getConfidenceBadge = (rating) => {
         const styles = {
-            'High': 'bg-green-100 text-green-800 border-green-200',
-            'Medium': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-            'Low': 'bg-red-100 text-red-800 border-red-200'
+            'High': 'bg-primary-soft text-primary border-primary/20',
+            'Medium': 'bg-accent-soft text-amber-800 border-accent/25',
+            'Low': 'bg-rose-50 text-rose-700 border-rose-200'
         };
         return styles[rating] || styles['Medium'];
     };
 
     const getVerificationBadge = (status) => {
         const styles = {
-            verified: 'bg-green-100 text-green-800 border-green-200',
-            unverified: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-            conflict: 'bg-red-100 text-red-800 border-red-200'
+            verified: 'bg-primary-soft text-primary border-primary/20',
+            unverified: 'bg-accent-soft text-amber-800 border-accent/25',
+            conflict: 'bg-rose-50 text-rose-700 border-rose-200'
         };
         return styles[status] || styles.unverified;
     };
@@ -109,7 +109,7 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
             </button>
 
             {/* Candidate Header Card */}
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden mb-8">
+            <div className="bg-[rgba(255,253,248,0.96)] rounded-2xl border border-light-200 shadow-card overflow-hidden mb-8">
                 {/* Gradient Top Bar */}
                 <div className="h-2 bg-gradient-to-r from-primary via-primary-hover to-accent"></div>
 
@@ -167,7 +167,7 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
                             <button
                                 onClick={() => onHire(candidate.candidate_id)}
                                 disabled={processing}
-                                className="btn bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all disabled:opacity-50 text-sm"
+                                className="btn btn-primary px-6 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all disabled:opacity-50 text-sm"
                             >
                                 {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                                 Proceed to Interview
@@ -224,7 +224,7 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
                             return (
                                 <div
                                     key={idx}
-                                    className={`bg-white rounded-xl border ${isWinner ? 'border-green-200 ring-2 ring-green-100' : 'border-gray-200'} shadow-sm overflow-hidden transition-all`}
+                                    className={`bg-[rgba(255,253,248,0.96)] rounded-xl border ${isWinner ? 'border-primary/25 ring-2 ring-primary/10' : 'border-light-200'} shadow-sm overflow-hidden transition-all`}
                                 >
                                     {/* Task Header */}
                                     <button
@@ -233,7 +233,7 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
                                     >
                                         <div className="flex items-center gap-4">
                                             {isWinner && (
-                                                <Award className="w-6 h-6 text-green-500" />
+                                                <Award className="w-6 h-6 text-accent" />
                                             )}
                                             <div className="text-left">
                                                 <h4 className="font-semibold text-gray-900">{alloc.task_title}</h4>
