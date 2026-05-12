@@ -179,6 +179,20 @@ MIGRATION_PATTERNS = [
     r"^schema\.(prisma|graphql)$",
 ]
 
+COMMON_PROJECT_DIRS = {
+    "app",
+    "apps",
+    "api",
+    "backend",
+    "client",
+    "frontend",
+    "packages",
+    "server",
+    "services",
+    "src",
+    "web",
+}
+
 
 def matches_any_pattern(filename: str, patterns: list) -> bool:
     """
@@ -408,9 +422,12 @@ class RepoSelector:
             return data
         return None
 
-    def _get_repo_contents(self, owner: str, repo: str) -> List[str]:
-        """Get root-level file names."""
+    def _get_repo_contents(self, owner: str, repo: str, path: str = "") -> List[str]:
+        """Get file names for a repository directory."""
+        cleaned_path = str(path or "").strip("/")
         url = f"{self.api_base}/repos/{owner}/{repo}/contents"
+        if cleaned_path:
+            url = f"{url}/{cleaned_path}"
         cached = cache.get_github_response(url)
         if isinstance(cached, list):
             return [item.get("name", "") for item in cached if isinstance(item, dict)]
@@ -420,6 +437,21 @@ class RepoSelector:
             cache.set_github_response(url, data)
             return [item.get("name", "") for item in data if isinstance(item, dict)]
         return []
+
+    def _manifest_score_for_repo(self, owner: str, repo: str, root_files: List[str]) -> tuple[float, bool, Optional[str]]:
+        """Detect manifests at repo root and in common monorepo/app folders."""
+        manifest_val, has_manifest, detected_lang = self._manifest_score(root_files)
+        if has_manifest:
+            return manifest_val, has_manifest, detected_lang
+
+        root_names = {str(name or "").strip("/").lower() for name in root_files}
+        for directory in sorted(COMMON_PROJECT_DIRS & root_names):
+            nested_files = self._get_repo_contents(owner, repo, directory)
+            manifest_val, has_manifest, detected_lang = self._manifest_score(nested_files)
+            if has_manifest:
+                return manifest_val, has_manifest, detected_lang
+
+        return 0.0, False, None
 
     def _fuzzy_name_match(self, repo_name: str, keywords: List[str]) -> float:
         """
@@ -590,6 +622,8 @@ class RepoSelector:
         keywords = []
         if job:
             keywords.append(job.get("title", ""))
+            keywords.append(job.get("company", ""))
+            keywords.append(job.get("category", ""))
             if job.get("description"):
                 # Extract meaningful words from description
                 desc_words = _tokenize_text(job["description"])
@@ -622,13 +656,16 @@ class RepoSelector:
 
             # Get root files for manifest detection
             root_files = self._get_repo_contents(owner, repo_name)
-            manifest_val, has_manifest, detected_lang = self._manifest_score(root_files)
+            manifest_val, has_manifest, detected_lang = self._manifest_score_for_repo(owner, repo_name, root_files)
 
             # Use detected language if GitHub's language field is not set
             final_language = repo_language or detected_lang
 
             # Calculate component scores
-            name_score = self._fuzzy_name_match(repo_name, keywords)
+            name_score = max(
+                self._fuzzy_name_match(repo_name, keywords),
+                self._fuzzy_name_match(repo_data.get("description") or "", keywords) * 0.85,
+            )
             recency = self._recency_score(pushed_at)
             size_scr = self._size_score(size_kb)
             lang_match = self._language_match_score(final_language, required_languages)

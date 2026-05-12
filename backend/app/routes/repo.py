@@ -80,6 +80,8 @@ def select_repos(request: RepoSelectionRequest, db: Session = Depends(get_db)):
                  job_dict = {
                     "title": outcome.title,
                     "description": outcome.description,
+                    "company": outcome.company,
+                    "category": outcome.category,
                     "required_languages": [] # Outcome doesn't have languages yet
                 }
             
@@ -87,6 +89,8 @@ def select_repos(request: RepoSelectionRequest, db: Session = Depends(get_db)):
             job_dict = {
                 "title": job_obj.title,
                 "description": job_obj.description,
+                "company": job_obj.company,
+                "category": job_obj.category,
                 "required_languages": job_obj.required_languages or []
             }
             

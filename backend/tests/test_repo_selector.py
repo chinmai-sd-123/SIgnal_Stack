@@ -30,8 +30,9 @@ class FakeRepoSelector(RepoSelector):
     def _get_user_repos(self, username: str, limit: int = 30):
         return self.repos
 
-    def _get_repo_contents(self, owner: str, repo: str):
-        return self.contents.get(repo, [])
+    def _get_repo_contents(self, owner: str, repo: str, path: str = ""):
+        key = f"{repo}/{path.strip('/')}" if path else repo
+        return self.contents.get(key, [])
 
 
 def repo_payload(name, language="TypeScript", pushed_at="2026-05-01T00:00:00Z", size=1200, **overrides):
@@ -113,6 +114,35 @@ def test_select_repos_ranks_job_relevant_repo_above_recent_distractor():
     selected = selector.select_repos_for_candidate({"github_username": "candidate"}, job, max_repos=3)
 
     assert [repo.repo for repo in selected] == ["auth-api", "portfolio-site"]
+    assert selected[0].breakdown["name_match"] > selected[1].breakdown["name_match"]
+
+
+@pytest.mark.unit
+def test_select_repos_uses_company_keyword_and_nested_manifests_for_product_repo():
+    repos = [
+        repo_payload("SIgnal_Stack", language="Python", pushed_at="2026-05-12T00:00:00Z", size=640),
+        repo_payload("rag_playground", language="Jupyter Notebook", pushed_at="2026-05-11T00:00:00Z", size=190),
+    ]
+    selector = FakeRepoSelector(
+        repos=repos,
+        contents={
+            "SIgnal_Stack": ["backend", "frontend", "README.md"],
+            "SIgnal_Stack/backend": ["requirements.txt", "app"],
+            "SIgnal_Stack/frontend": ["package.json", "src"],
+            "rag_playground": ["requirements.txt", "notebooks"],
+        },
+    )
+    job = {
+        "title": "AI Product Engineer Intern",
+        "company": "SignalStack",
+        "required_languages": ["Python", "JavaScript", "TypeScript"],
+        "description": "Build an AI-native hiring evaluation system with repository parsing and dashboards.",
+    }
+
+    selected = selector.select_repos_for_candidate({"github_username": "candidate"}, job, max_repos=2)
+
+    assert selected[0].repo == "SIgnal_Stack"
+    assert selected[0].manifest_present is True
     assert selected[0].breakdown["name_match"] > selected[1].breakdown["name_match"]
 
 
