@@ -36,7 +36,22 @@ class GitHubService:
         owner, repo = parts[-2], parts[-1]
         return owner, repo
 
-    def _request(self, url: str, max_retries: int = 3) -> Optional[requests.Response]:
+    def _backoff_seconds(self, attempt: int) -> int:
+        return min((2 ** attempt) * 2, 10)
+
+    def _sleep_before_retry(self, seconds: int, attempt: int, max_retries: int, reason: str):
+        if attempt >= max_retries - 1:
+            return
+        logger.warning(
+            "[GitHub] %s. Backing off %ss (attempt %s/%s).",
+            reason,
+            seconds,
+            attempt + 1,
+            max_retries,
+        )
+        time.sleep(seconds)
+
+    def _request(self, url: str, max_retries: int = 4) -> Optional[requests.Response]:
         """
         Make a GET request with:
         - Exponential backoff on 429 / 500-range errors
@@ -46,6 +61,7 @@ class GitHubService:
         """
         headers = self.headers.copy()
 
+        last_error = None
         for attempt in range(max_retries):
             try:
                 response = self._session.get(url, headers=headers, timeout=15)
@@ -74,16 +90,21 @@ class GitHubService:
 
                 # ── 429 Too Many Requests: respect Retry-After ───────────────
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 60))
-                    logger.warning("[GitHub] 429 received. Waiting %ss (attempt %s).", retry_after, attempt + 1)
-                    time.sleep(retry_after)
+                    try:
+                        retry_after = int(response.headers.get("Retry-After", 60))
+                    except (TypeError, ValueError):
+                        retry_after = self._backoff_seconds(attempt)
+                    self._sleep_before_retry(retry_after, attempt, max_retries, "429 received")
                     continue
 
                 # ── 5xx server errors: exponential backoff ───────────────────
                 if response.status_code >= 500:
-                    wait = (2 ** attempt) * 2  # 2s, 4s, 8s
-                    logger.warning("[GitHub] %s error. Backing off %ss (attempt %s).", response.status_code, wait, attempt + 1)
-                    time.sleep(wait)
+                    self._sleep_before_retry(
+                        self._backoff_seconds(attempt),
+                        attempt,
+                        max_retries,
+                        f"{response.status_code} error",
+                    )
                     continue
 
                 # ── Auth failure on token: retry without token (public repos) ─
@@ -94,15 +115,24 @@ class GitHubService:
 
                 return response
 
-            except requests.exceptions.Timeout:
-                wait = (2 ** attempt) * 2
-                logger.warning("[GitHub] Timeout on attempt %s. Backing off %ss.", attempt + 1, wait)
-                time.sleep(wait)
+            except requests.exceptions.Timeout as e:
+                last_error = e
+                self._sleep_before_retry(
+                    self._backoff_seconds(attempt),
+                    attempt,
+                    max_retries,
+                    "timeout",
+                )
             except requests.exceptions.RequestException as e:
-                logger.warning("[GitHub] Request error: %s", e)
-                return None
+                last_error = e
+                self._sleep_before_retry(
+                    self._backoff_seconds(attempt),
+                    attempt,
+                    max_retries,
+                    f"request error: {e}",
+                )
 
-        logger.warning("[GitHub] All %s attempts failed for %s", max_retries, url)
+        logger.warning("[GitHub] All %s attempts failed for %s. Last error: %s", max_retries, url, last_error)
         return None
 
     def get_repo_content(self, repo_url: str, path: str = "") -> List[Dict]:
