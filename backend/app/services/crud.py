@@ -7,7 +7,7 @@ import json
 import uuid
 import time
 
-MAX_STORED_EVIDENCE_ITEMS = 3
+MAX_STORED_CODE_EVIDENCE_ITEMS = 2
 MAX_STORED_SNIPPET_CHARS = 1200
 
 
@@ -15,17 +15,64 @@ def _trim_text(value: str, limit: int = MAX_STORED_SNIPPET_CHARS) -> str:
     text = str(value or "")
     if len(text) <= limit:
         return text
-    return text[:limit].rstrip() + "\n[... truncated for report storage ...]"
+    return text[:limit].rstrip() + "\n\n[Snippet shortened. Open the GitHub source link for the full file.]"
+
+
+def _evidence_bucket(item: dict) -> str:
+    ref = str(item.get("ref") or "")
+    ev_type = str(item.get("type") or "")
+    if ref.startswith("AI_FINDING:"):
+        return "ai_finding"
+    if ref.startswith("AUTH:") or ref == "GIT_LOG" or ev_type == "authorship_context":
+        return "authorship"
+    if ref.startswith("SCAN:") or ref == "PROJECT_SCAN" or ev_type == "project_health":
+        return "project_health"
+    if ref.startswith("REPO:") or ref == "REPOSITORY":
+        return "repository"
+    if ev_type == "work_artifact" or ref.startswith("ARTIFACT:"):
+        return "artifact"
+    if ev_type in {"code_snippet", "file_ref", "repo_context"} or ref.startswith(("FILE:", "CODE:", "ENTRY:")):
+        return "code"
+    return "other"
 
 
 def _compact_evidence_items(items):
-    compacted = []
-    for item in list(items or [])[:MAX_STORED_EVIDENCE_ITEMS]:
+    buckets = {
+        "ai_finding": [],
+        "code": [],
+        "artifact": [],
+        "repository": [],
+        "authorship": [],
+        "project_health": [],
+        "other": [],
+    }
+
+    for item in list(items or []):
         if hasattr(item, "model_dump"):
             item = item.model_dump()
+        buckets.setdefault(_evidence_bucket(item), []).append(item)
+
+    selected = []
+    selected.extend(buckets["ai_finding"][:1])
+    selected.extend(buckets["code"][:MAX_STORED_CODE_EVIDENCE_ITEMS])
+    selected.extend(buckets["artifact"][:1])
+    selected.extend(buckets["repository"][:1])
+    selected.extend(buckets["authorship"][:1])
+    selected.extend(buckets["project_health"][:1])
+    selected.extend(buckets["other"][:1])
+
+    compacted = []
+    seen = set()
+    for item in selected:
+        key = (item.get("type"), item.get("ref"), item.get("source_url"))
+        if key in seen:
+            continue
+        seen.add(key)
+        bucket = _evidence_bucket(item)
+        limit = 900 if bucket in {"ai_finding", "repository", "authorship", "project_health"} else MAX_STORED_SNIPPET_CHARS
         compacted.append({
             **item,
-            "snippet": _trim_text(item.get("snippet", "")),
+            "snippet": _trim_text(item.get("snippet", ""), limit=limit),
         })
     return compacted
 

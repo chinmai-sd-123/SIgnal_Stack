@@ -4,6 +4,22 @@ import EvidenceItem from '../components/EvidenceItem';
 import FeedbackModal from '../components/FeedbackModal'; // Import Feedback Modal
 import { ArrowLeft, Award, TrendingUp, CheckCircle, XCircle, ExternalLink, ChevronDown, ChevronUp, BarChart3, Loader2, Trophy, Medal, Lightbulb } from 'lucide-react';
 
+function evidenceRank(evidence) {
+    const ref = evidence?.ref || evidence?.reference || '';
+    const type = evidence?.type || '';
+    if (ref.startsWith('AI_FINDING:')) return 0;
+    if (type === 'code_snippet' || type === 'file_ref' || ref.startsWith('FILE:') || ref.startsWith('CODE:') || ref.startsWith('ENTRY:')) return 1;
+    if (type === 'work_artifact' || ref.startsWith('ARTIFACT:')) return 2;
+    if (ref.startsWith('REPO:') || ref === 'REPOSITORY') return 3;
+    if (ref.startsWith('AUTH:') || ref === 'GIT_LOG' || type === 'authorship_context') return 4;
+    if (ref.startsWith('SCAN:') || ref === 'PROJECT_SCAN' || type === 'project_health') return 5;
+    return 6;
+}
+
+function orderEvidence(items = []) {
+    return [...items].sort((a, b) => evidenceRank(a) - evidenceRank(b));
+}
+
 /**
  * CandidateDetailView - Shows detailed evaluation for a single candidate.
  * Props:
@@ -270,9 +286,9 @@ export default function CandidateDetailView({ candidate, allAllocations, allSumm
                                             {/* Evidence */}
                                             {candidateEvidence && candidateEvidence.length > 0 && (
                                                 <div>
-                                                    <h5 className="text-sm font-semibold text-gray-700 mb-3">Evidence</h5>
+                                                    <h5 className="text-sm font-semibold text-gray-700 mb-3">Evidence Trail</h5>
                                                     <div className="space-y-3">
-                                                        {candidateEvidence.map((ev, evIdx) => (
+                                                        {orderEvidence(candidateEvidence).map((ev, evIdx) => (
                                                             <EvidenceItem key={evIdx} evidence={ev} />
                                                         ))}
                                                     </div>
