@@ -37,6 +37,7 @@ The system is intentionally strict about evidence and intentionally fair about p
 | Job modeling | Creates job postings with multiple role-specific outcomes. |
 | Outcome decomposition | Uses AI to generate short, verifiable evaluation signals. |
 | Candidate intake | Provides public invite links and a candidate application portal. |
+| Recruiter access | Supports email/password login, invite-only recruiter signup, admin role controls, and recruiter-scoped data isolation. |
 | Repository analysis | Reads source files, folders, manifests, commits, README files, and selected snippets. |
 | Repo selection | Selects likely relevant repositories from a GitHub profile using job context. |
 | Evidence grounding | Grounds AI assessments in concrete code snippets and deterministic facts. |
@@ -44,6 +45,7 @@ The system is intentionally strict about evidence and intentionally fair about p
 | Queueing | Supports Redis-backed background evaluation for high-volume candidate batches. |
 | Review UX | Shows ranked candidates, evidence cards, skill dimensions, and decision actions. |
 | Learning loop | Captures feedback and adjusts future signal weights. |
+| Admin operations | Exposes admin-only signal weights, task learning, audit logs, LLM logs, recruiter invites, and metrics. |
 
 ---
 
@@ -79,6 +81,7 @@ Recruiter Report: score, confidence, verification, evidence, decision
 - **SQLAlchemy** persistence layer
 - **PostgreSQL** for production data
 - **Redis** for durable evaluation queue and cache when configured
+- **JWT-style bearer authentication** for recruiters and admins
 - **OpenAI** for grounded assessment and signal generation
 - **GitHub API** for repository tree, file, commit, and metadata analysis
 - **LeetCode GraphQL** lookup for real profile stats, with no fake fallback
@@ -93,7 +96,39 @@ Recruiter Report: score, confidence, verification, evidence, decision
 - **Recharts**
 - **Lucide icons**
 
-The frontend is job-centric: recruiters manage jobs, outcomes, invite links, candidates, evaluation progress, and final decisions from one workflow.
+The frontend is job-centric: recruiters manage jobs, outcomes, invite links, candidates, evaluation progress, and final decisions from one workflow. Public candidate invite links remain unauthenticated, while recruiter/admin pages require login.
+
+---
+
+## Authentication and Access Control
+
+SignalStack now supports multi-recruiter usage with role-based access.
+
+| Role | Access |
+| --- | --- |
+| Admin | Can access all jobs, admin panels, recruiter invites, signal weights, task learning, audit logs, LLM logs, analytics, and metrics. |
+| Recruiter | Can create and manage only their own jobs, outcomes, invites, submissions, evaluations, reports, and decisions. |
+| Candidate | Can access only public invite/application links and submit proof for that invite. |
+
+Authentication behavior:
+
+- Recruiters log in with email and password.
+- New recruiter signup is invite-only.
+- Admin creates recruiter invites from the admin/recruiter management flow.
+- The first login for `ADMIN_EMAIL` can bootstrap the admin account.
+- Jobs are owned by `recruiter_id`; non-admin users only see and mutate their own jobs.
+- Admin pages are guarded by role checks, not only hidden in the frontend.
+- Public candidate application links stay public so candidates can apply without an account.
+
+Security-sensitive operations include backend access checks:
+
+- Job create/list/detail/update/archive/delete
+- Outcome create/edit/delete
+- Invite create/list/delete
+- Submission list/delete
+- Evaluation queue/progress/report fetch
+- Feedback and decision history
+- Admin-only weight learning, audit logs, LLM logs, metrics, and recruiter invites
 
 ---
 
@@ -111,6 +146,8 @@ SignalStack does not produce a single opaque AI number. It separates the report 
 
 Authorship is not used as a blunt punishment. The system reports whether authorship is verified, unverified, or conflicting, while still evaluating the work itself. This makes the output fairer for early applicants and more useful for recruiters.
 
+The headline candidate score is the final fit score. Capability remains visible as a separate sub-score, so recruiters can distinguish "this candidate built the core thing" from "this project also has strong verification and production hygiene." The report-level top fit score and the top candidate card use the same scoring definition.
+
 ---
 
 ## Evidence Grounding
@@ -121,8 +158,11 @@ The evaluator is designed to avoid hallucinated assessments:
 - Evidence is selected from actual repository files, code snippets, manifests, README files, commits, and deterministic facts.
 - Resume links are treated as candidate context, not proof of code implementation.
 - Evidence snippets are scoped to the candidate and submission so one candidate's repository does not leak into another report.
-- The UI exposes key evidence and full snippets so reviewers can inspect the basis for each score.
+- The UI presents evidence as a clean audit trail: AI assessment, key evidence, short code snippets with GitHub links, repository structure, authorship verification, and project health scan.
+- Stored evidence is compacted to protect database reliability, while preserving the important evidence categories reviewers need to audit a decision.
+- Full code inspection redirects to GitHub source links instead of storing huge file blobs in the evaluation row.
 - If no relevant code or artifact evidence exists, score strength is capped.
+- GitHub fetches retry transient disconnects, timeouts, rate limits, and server errors with exponential backoff before falling back.
 
 ---
 
@@ -138,6 +178,8 @@ SignalStack supports high-volume candidate evaluation through a background queue
 | Redis configured | Redis-backed queue survives process restarts better than memory-only queue. |
 | Redis unavailable | System falls back to in-memory queue and cache for local development. |
 | New candidate after an earlier evaluation | Only missing/stale report candidates are refreshed and merged into the latest outcome report. Existing evaluated candidates remain visible while the full report catches up. |
+| Existing report while refresh is running | Recruiters can open the partial/current report while missing candidates are evaluated in the background. |
+| Re-clicking evaluate | Already evaluated candidates are not unnecessarily re-run unless the outcome/report is stale. |
 
 The frontend shows job-scoped queue progress, not global queue noise from another job.
 For small and medium batches, the job progress card lists every evaluated candidate returned by the backend instead of hiding candidates behind a fixed five-person preview.
@@ -253,9 +295,11 @@ Existing controls:
 | GitHub cache | Avoids repeatedly fetching repository trees, files, and commits. |
 | LLM response cache | Reuses model responses for identical prompts and schemas. |
 | Evidence selector | Sends only high-signal snippets instead of entire repositories. |
+| Evidence compaction | Stores a compact audit trail instead of huge report payloads. |
 | Deterministic signals | Computes tests, CI, manifests, authorship, frameworks, and repo facts without LLM calls. |
 | Top-candidate deep evaluation | Screens all candidates first, then deep-evaluates the strongest candidates. |
 | Redis queue | Prevents duplicate queued work and keeps processing durable. |
+| Incremental report merge | Evaluates only missing/stale candidates when new submissions arrive. |
 
 Recommended cost strategy:
 
@@ -336,7 +380,16 @@ It analyzes:
 - Framework and library usage
 - Domain-specific code evidence for each outcome signal
 
-Small but important source files are preserved as evidence instead of being drowned out by generic config files.
+Small but important source files are preserved as evidence instead of being drowned out by generic config files. GitHub requests are cached and retried with backoff for transient `RemoteDisconnected`, timeout, `429`, and `5xx` failures, which reduces false "no evidence found" outcomes caused by network instability.
+
+Report evidence is intentionally compact:
+
+- Keep the key AI-selected evidence.
+- Keep the strongest source snippets for the signal.
+- Keep repository structure context.
+- Keep authorship verification.
+- Keep project health scan.
+- Link reviewers to GitHub for full source inspection.
 
 ---
 
@@ -344,6 +397,8 @@ Small but important source files are preserved as evidence instead of being drow
 
 ### Recruiter Workflow
 
+- Log in with email/password.
+- Admins invite new recruiter accounts.
 - Create a job.
 - Add one or more outcomes.
 - Generate concise evaluation signals.
@@ -353,6 +408,7 @@ Small but important source files are preserved as evidence instead of being drow
 - Inspect evidence.
 - Proceed to interview or reject.
 - Capture feedback for future weighting.
+- Delete jobs, outcomes, invites, or submissions with guarded destructive actions where supported.
 
 ### Candidate Workflow
 
@@ -373,6 +429,17 @@ Small but important source files are preserved as evidence instead of being drow
 - Score candidate per outcome.
 - Aggregate results across the job.
 - Surface report to recruiter.
+- Merge newly evaluated candidates into existing reports without hiding previous candidates.
+
+### Admin Workflow
+
+- Invite recruiters and review invite status.
+- View all jobs across recruiters.
+- Monitor analytics, decision history, and active roles.
+- Inspect signal weights and feedback-driven learning history.
+- Review task-level learning changes.
+- Inspect audit logs and LLM interaction logs.
+- Check LLM usage, latency, tokens, cache hits, and estimated cost metrics.
 
 ---
 
@@ -388,7 +455,7 @@ Signal_Stack/
       pipeline/            Extraction, evidence, scoring, evaluation
       routes/              FastAPI route handlers
       schemas/             Pydantic request/response schemas
-      services/            GitHub, Redis, LLM, queue, shortlist, LeetCode
+      services/            Auth, GitHub, Redis, LLM, queue, feedback, LeetCode
       utils/               Shared helpers
     tests/                 Unit and integration tests
     requirements.txt
@@ -445,7 +512,12 @@ DATABASE_URL=postgresql://postgres:password@localhost:5432/signalstack
 DATABASE_URL_TEST=postgresql://postgres:password@localhost:5432/signalstack_test
 
 REDIS_URL=redis://localhost:6379/0
-JWT_SECRET=change-this-in-production
+
+AUTH_SECRET=replace-with-a-long-random-secret
+JWT_SECRET=
+ADMIN_EMAIL=you@example.com
+DEMO_RECRUITER_EMAIL=demo@signalstack.dev
+DEMO_RECRUITER_PASSWORD=Demo@12345
 SIGNALSTACK_API_KEY=
 
 WORKER_THREADS=3
@@ -475,6 +547,21 @@ Open:
 - API docs: `http://localhost:8000/docs`
 - Metrics: `http://localhost:8000/metrics`
 
+### First Admin Login
+
+Set `AUTH_SECRET` and `ADMIN_EMAIL` before sharing the app with recruiters.
+
+The first successful login using `ADMIN_EMAIL` bootstraps an admin account if one does not already exist. After that, the admin can create invite-only recruiter accounts from the recruiter invite/admin flow.
+
+Optional demo seeding:
+
+```bash
+cd backend
+python seed_demo_auth.py
+```
+
+The seed script uses `ADMIN_EMAIL`, `DEMO_RECRUITER_EMAIL`, and `DEMO_RECRUITER_PASSWORD`.
+
 ---
 
 ## Environment Variables
@@ -489,7 +576,11 @@ Open:
 | `DATABASE_URL` | Recommended | Production database connection. |
 | `DATABASE_URL_TEST` | Test only | Integration test database. |
 | `REDIS_URL` | Recommended | Redis cache and job evaluation queue. |
-| `JWT_SECRET` | Production | Token signing secret. |
+| `AUTH_SECRET` | Production | Long random secret used for recruiter/admin auth token signing. |
+| `JWT_SECRET` | Optional | Backward-compatible fallback if `AUTH_SECRET` is not set. |
+| `ADMIN_EMAIL` | Production | Email address that receives admin role and can bootstrap the first admin login. |
+| `DEMO_RECRUITER_EMAIL` | Optional | Demo recruiter email used by the auth seed script. |
+| `DEMO_RECRUITER_PASSWORD` | Optional | Demo recruiter password used by the auth seed script. |
 | `SIGNALSTACK_API_KEY` | Optional | External integration key. |
 | `WORKER_THREADS` | Optional | In-memory worker concurrency. |
 | `ENABLE_LLM_SUMMARIZATION` | Optional | Enables LLM-based summaries. |
@@ -527,6 +618,8 @@ Recommended pre-merge checklist:
 - Frontend lint passes.
 - Frontend production build passes.
 - No secrets committed.
+- Auth isolation tests pass when changing recruiter/admin access.
+- Admin-only routes are checked from both admin and recruiter accounts.
 - Redis queue tested if changing evaluation processing.
 - Evidence grounding tests updated if changing scoring or LLM prompts.
 - Browser check completed for candidate application and job evaluation pages.
@@ -537,14 +630,34 @@ Recommended pre-merge checklist:
 
 | Endpoint | Purpose |
 | --- | --- |
+| `POST /recruiter/login` | Log in as recruiter or admin. |
+| `POST /recruiter/signup` | Create recruiter account from an admin-generated invite token. |
+| `GET /recruiter/me` | Fetch the current authenticated recruiter. |
+| `POST /recruiter/invites` | Admin-only recruiter invite creation. |
+| `GET /recruiter/invites` | Admin-only recruiter invite list. |
+| `GET /recruiter/invites/{token}` | Public lookup for recruiter signup invite metadata. |
 | `POST /jobs` | Create a job. |
 | `GET /jobs` | List jobs. |
 | `GET /jobs/{job_id}` | Get job details. |
+| `PATCH /jobs/{job_id}` | Update/archive job metadata. |
+| `DELETE /jobs/{job_id}` | Delete a job and associated job data after guarded confirmation. |
 | `GET /jobs/{job_id}/outcomes` | List outcomes under a job. |
+| `POST /outcomes` | Create an outcome under a job. |
+| `PATCH /outcomes/{outcome_id}` | Edit outcome and regenerate its stale report state. |
+| `DELETE /outcomes/{outcome_id}` | Delete an outcome and associated evaluations/proofs. |
 | `POST /jobs/{job_id}/invites` | Create an invite link. |
 | `GET /jobs/{job_id}/invites` | List invites and submissions. |
+| `DELETE /invites/{invite_id}` | Revoke/delete an invite. |
+| `DELETE /submissions/{submission_id}` | Delete a candidate submission. |
 | `POST /jobs/{job_id}/evaluations/queue` | Queue background evaluation. |
 | `GET /jobs/{job_id}/evaluations/progress` | Read job-scoped evaluation progress. |
+| `GET /analytics/metrics` | Recruiter-scoped or admin-wide analytics dashboard metrics. |
+| `GET /analytics/decisions` | Recruiter-scoped or admin-wide decision history. |
+| `GET /admin/signal-weights` | Admin-only signal weight view. |
+| `GET /admin/weight-history` | Admin-only signal weight learning history. |
+| `GET /admin/task-weight-history` | Admin-only task learning history. |
+| `GET /admin/audit-logs` | Admin-only audit logs. |
+| `GET /admin/llm-logs` | Admin-only LLM interaction logs. |
 | `POST /plugin/suggest-tasks` | Generate outcome signals. |
 | `POST /plugin/github/repos/select` | Select relevant repositories. |
 | `GET /plugin/leetcode/{username}` | Fetch real LeetCode stats. |
@@ -572,10 +685,11 @@ SignalStack is built around five product principles:
 - Realtime evaluation updates via SSE or WebSockets.
 - Richer repo diff and commit timeline views.
 - Per-outcome calibration controls.
-- Multi-recruiter authentication and role-based access.
 - Evaluation replay and comparison snapshots.
 - Organization-level analytics and hiring quality metrics.
 - Pluggable evidence sources beyond GitHub and LeetCode.
+- Stronger organization/team permissions beyond the current admin/recruiter split.
+- Evidence-quality regression suite for common false-positive repo patterns.
 
 ---
 
