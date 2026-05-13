@@ -4,6 +4,7 @@ import app.schemas as schemas
 from app.pipeline.evaluator import (
     _accumulate_dimensions,
     _average_dimension_accumulator,
+    _candidate_fit_score,
     _candidate_quality,
     Evaluator,
 )
@@ -48,6 +49,27 @@ def test_candidate_quality_flags_unmodified_fork_as_conflict():
     assert quality["verification_status"] == "conflict"
     assert "fork_unmodified" in quality["risk_flags"]
     assert quality["confidence_rating"] == "Low"
+
+
+@pytest.mark.unit
+def test_candidate_fit_score_uses_same_blend_as_report_fit():
+    quality = _candidate_quality(
+        {
+            "authorship_fraction": 1.0,
+            "valid_repo": 1.0,
+            "recent_activity_score": 1.0,
+            "readme_quality_score": 1.0,
+            "tests_present": 1.0,
+            "ci_cd_present": 1.0,
+            "deployment_ready": 1.0,
+        },
+        capability_score=0.48,
+    )
+
+    fit_score = _candidate_fit_score(0.48, quality)
+
+    assert fit_score > 0.48
+    assert fit_score == round(0.48 * 0.75 + quality["scoring"].capped_score * 0.25, 3)
 
 
 @pytest.mark.unit
@@ -217,4 +239,6 @@ def test_batched_evaluator_uses_one_llm_call_per_candidate_outcome(monkeypatch):
     assert calls[0]["tracking_context"]["operation"] == "outcome_signal_interpretation"
     assert len(result.work_allocation) == 2
     assert result.candidate_summaries[0].candidate_id == "candidate@example.com"
+    assert result.fit_score == result.candidate_summaries[0].overall_score
+    assert result.candidate_summaries[0].overall_score != result.candidate_summaries[0].capability_score
     assert result.candidate_summaries[0].tasks_won == 2

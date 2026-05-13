@@ -23,7 +23,7 @@ class CandidateScore(BaseModel):
 # NEW: Summary of a candidate across all tasks
 class CandidateSummary(BaseModel):
     candidate_id: str
-    overall_score: float  # Average score across all tasks
+    overall_score: float  # Final fit score after light deterministic quality blend
     capability_score: Optional[float] = None  # Direct task/code evidence score
     evidence_confidence: Optional[float] = None  # Signal coverage / evidence completeness
     production_readiness: Optional[float] = None  # Tests/CI/deploy/docs hygiene

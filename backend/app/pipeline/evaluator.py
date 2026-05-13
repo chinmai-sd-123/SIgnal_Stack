@@ -126,6 +126,21 @@ def _candidate_quality(signals: Dict, capability_score: float) -> Dict:
         "scoring": scoring,
     }
 
+
+def _candidate_fit_score(capability_score: float, quality: Dict) -> float:
+    """
+    Candidate-facing fit score.
+
+    Capability is the direct task/code evidence score. The displayed overall
+    fit should use the same light deterministic blend as the report header so
+    the top candidate card and top fit score do not disagree.
+    """
+    scoring = quality.get("scoring") if quality else None
+    if not scoring:
+        return round(capability_score, 3)
+    return round(capability_score * 0.75 + scoring.capped_score * 0.25, 3)
+
+
 class Evaluator:
     def __init__(self):
         self.matcher = Matcher()
@@ -353,10 +368,11 @@ class Evaluator:
             avg_score = stats['total_score'] / stats['task_count']
             
             quality = _candidate_quality(signals_map.get(cand_id, {}), avg_score)
+            fit_score = _candidate_fit_score(avg_score, quality)
             
             candidate_summaries.append(schemas.CandidateSummary(
                 candidate_id=cand_id,
-                overall_score=round(avg_score, 2),
+                overall_score=round(fit_score, 2),
                 capability_score=quality["capability_score"],
                 evidence_confidence=quality["evidence_confidence"],
                 production_readiness=quality["production_readiness"],
@@ -383,7 +399,7 @@ class Evaluator:
             # Let direct task evidence lead for early applications. Deterministic
             # project-health signals still matter, but missing tests/CI should
             # not overpower a relevant working implementation.
-            final_score = round(raw_final * 0.75 + scoring.capped_score * 0.25, 3)
+            final_score = candidate_summaries[0].overall_score
         else:
             final_score = round(raw_final, 3)
             top_quality = {
@@ -648,9 +664,10 @@ class Evaluator:
 
             avg_score = stats["total_score"] / stats["task_count"]
             quality = _candidate_quality(signals_map.get(cand_id, {}), avg_score)
+            fit_score = _candidate_fit_score(avg_score, quality)
             candidate_summaries.append(schemas.CandidateSummary(
                 candidate_id=cand_id,
-                overall_score=round(avg_score, 2),
+                overall_score=round(fit_score, 2),
                 capability_score=quality["capability_score"],
                 evidence_confidence=quality["evidence_confidence"],
                 production_readiness=quality["production_readiness"],
@@ -670,7 +687,7 @@ class Evaluator:
             top_quality = _candidate_quality(top_signals, top_capability)
             scoring = top_quality["scoring"]
             all_risk_flags = scoring.risk_flags
-            final_score = round(raw_final * 0.75 + scoring.capped_score * 0.25, 3)
+            final_score = candidate_summaries[0].overall_score
         else:
             final_score = round(raw_final, 3)
             top_quality = {
