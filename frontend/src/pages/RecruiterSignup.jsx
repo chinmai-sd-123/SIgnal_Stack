@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { AlertTriangle, ArrowRight, Loader2, Lock, Mail, User } from 'lucide-react';
 import { getRecruiterInvite, recruiterSignup } from '../api';
+import AuthPageShell from '../components/AuthPageShell';
 
 export default function RecruiterSignup() {
     const [searchParams] = useSearchParams();
@@ -59,94 +61,118 @@ export default function RecruiterSignup() {
     };
 
     const inputClass =
-        'block w-full rounded-xl border border-light-200 bg-white px-4 py-2.5 text-text-primary placeholder-text-muted shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 sm:text-sm';
+        'block w-full rounded-lg border border-light-200 bg-white py-3 pl-11 pr-4 text-text-primary placeholder-text-muted shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 sm:text-sm';
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-hero-gradient py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full animate-slide-up">
-                <div className="text-center mb-6">
-                    <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold tracking-wide text-white backdrop-blur">
-                        <span className="h-2 w-2 rounded-full bg-accent" />
-                        SignalStack
-                    </div>
-                    <h2 className="mt-5 text-3xl font-bold text-white">Create Recruiter Account</h2>
-                    <p className="mt-2 text-sm text-white/70">
-                        Accounts are invite-only. Use the email your admin invited.
-                    </p>
+        <AuthPageShell
+            eyebrow="Invite signup"
+            title="Create your recruiter account."
+            subtitle="Set up your SignalStack workspace using the email your admin invited."
+            footer={
+                <>
+                    Already have an account?{' '}
+                    <Link to="/login" className="font-bold text-primary hover:underline">
+                        Sign in
+                    </Link>
+                </>
+            }
+        >
+            {loading ? (
+                <div className="flex items-center gap-3 rounded-lg border border-primary/15 bg-primary-soft/70 p-4 text-sm font-semibold text-primary">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Checking invite...
                 </div>
-
-                <div className="rounded-3xl bg-bg-card shadow-card p-8">
-                    {loading ? (
-                        <div className="text-center text-sm text-text-secondary">Checking invite…</div>
-                    ) : error && !invite ? (
-                        <div className="rounded-xl border border-error/30 bg-error/5 p-4 text-sm text-error">
-                            {error}
-                            <div className="mt-3">
-                                <Link to="/login" className="font-semibold text-error underline">Back to login</Link>
-                            </div>
+            ) : error && !invite ? (
+                <div className="rounded-lg border border-error/30 bg-error/5 p-4 text-sm text-error">
+                    <div className="flex items-start gap-3">
+                        <AlertTriangle className="mt-0.5 h-5 w-5 flex-none" />
+                        <div>
+                            <p className="font-bold">Invite unavailable</p>
+                            <p className="mt-1 leading-5">{error}</p>
                         </div>
-                    ) : (
-                        <form className="space-y-5" onSubmit={handleSubmit}>
-                            <div>
-                                <label htmlFor="name" className="block text-sm font-medium text-text-secondary mb-1">Name</label>
-                                <input
-                                    id="name"
-                                    name="name"
-                                    type="text"
-                                    className={inputClass}
-                                    placeholder="Your name"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                />
-                            </div>
-                            <div>
-                                <label htmlFor="email-address" className="block text-sm font-medium text-text-secondary mb-1">Email address</label>
-                                <input
-                                    id="email-address"
-                                    name="email"
-                                    type="email"
-                                    required
-                                    className={`${inputClass} bg-light-50`}
-                                    placeholder="Email address"
-                                    value={email}
-                                    readOnly
-                                />
-                            </div>
-                            <div>
-                                <label htmlFor="password" className="block text-sm font-medium text-text-secondary mb-1">Password</label>
-                                <input
-                                    id="password"
-                                    name="password"
-                                    type="password"
-                                    required
-                                    minLength={8}
-                                    className={inputClass}
-                                    placeholder="At least 8 characters"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                />
-                            </div>
-
-                            {error && (
-                                <div className="rounded-xl border border-error/30 bg-error/5 px-3 py-2 text-sm text-error">{error}</div>
-                            )}
-
-                            <button
-                                type="submit"
-                                disabled={submitting}
-                                className="w-full rounded-xl bg-primary py-2.5 px-4 text-sm font-semibold text-white shadow-glow-sm transition-colors hover:bg-primary-hover disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-                            >
-                                {submitting ? 'Creating account…' : 'Create account'}
-                            </button>
-
-                            <p className="text-center text-sm text-text-secondary">
-                                Already have an account?{' '}
-                                <Link to="/login" className="font-semibold text-primary hover:underline">Sign in</Link>
-                            </p>
-                        </form>
-                    )}
+                    </div>
+                    <Link
+                        to="/login"
+                        className="mt-4 inline-flex items-center rounded-lg border border-error/25 px-3 py-2 text-xs font-bold text-error hover:bg-error hover:text-white"
+                    >
+                        Back to login
+                    </Link>
                 </div>
-            </div>
-        </div>
+            ) : (
+                <form className="space-y-5" onSubmit={handleSubmit}>
+                    <div>
+                        <label htmlFor="name" className="mb-2 block text-sm font-semibold text-text-secondary">
+                            Name
+                        </label>
+                        <div className="relative">
+                            <User className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+                            <input
+                                id="name"
+                                name="name"
+                                type="text"
+                                className={inputClass}
+                                placeholder="Your name"
+                                value={name}
+                                onChange={(event) => setName(event.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label htmlFor="email-address" className="mb-2 block text-sm font-semibold text-text-secondary">
+                            Email address
+                        </label>
+                        <div className="relative">
+                            <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+                            <input
+                                id="email-address"
+                                name="email"
+                                type="email"
+                                required
+                                className={`${inputClass} bg-light-50`}
+                                placeholder="Email address"
+                                value={email}
+                                readOnly
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label htmlFor="password" className="mb-2 block text-sm font-semibold text-text-secondary">
+                            Password
+                        </label>
+                        <div className="relative">
+                            <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+                            <input
+                                id="password"
+                                name="password"
+                                type="password"
+                                required
+                                minLength={8}
+                                className={inputClass}
+                                placeholder="At least 8 characters"
+                                value={password}
+                                onChange={(event) => setPassword(event.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    {error && (
+                        <div className="rounded-lg border border-error/30 bg-error/5 px-3 py-2 text-sm font-medium text-error">
+                            {error}
+                        </div>
+                    )}
+
+                    <button
+                        type="submit"
+                        disabled={submitting}
+                        className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-bold text-white shadow-glow-sm hover:bg-primary-hover disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                    >
+                        {submitting ? 'Creating account...' : 'Create account'}
+                        {!submitting && <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />}
+                    </button>
+                </form>
+            )}
+        </AuthPageShell>
     );
 }

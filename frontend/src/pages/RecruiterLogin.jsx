@@ -1,7 +1,8 @@
-
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { ArrowRight, KeyRound, Lock, Mail } from 'lucide-react';
 import { recruiterLogin } from '../api';
+import AuthPageShell from '../components/AuthPageShell';
 
 const DEMO_EMAIL = 'demo@signalstack.dev';
 const DEMO_PASSWORD = 'Demo@12345';
@@ -39,107 +40,110 @@ const RecruiterLogin = () => {
     };
 
     const inputClass =
-        'block w-full rounded-xl border border-light-200 bg-white px-4 py-2.5 text-text-primary placeholder-text-muted shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 sm:text-sm';
+        'block w-full rounded-lg border border-light-200 bg-white py-3 pl-11 pr-4 text-text-primary placeholder-text-muted shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 sm:text-sm';
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-hero-gradient py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full animate-slide-up">
-                <div className="text-center mb-6">
-                    <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold tracking-wide text-white backdrop-blur">
-                        <span className="h-2 w-2 rounded-full bg-accent" />
-                        SignalStack
+        <AuthPageShell
+            eyebrow="Recruiter login"
+            title="Welcome back."
+            subtitle="Sign in to your hiring workspace and continue reviewing candidate proof of work."
+            footer="New recruiter accounts require an admin invite."
+        >
+            <form className="space-y-5" onSubmit={handleSubmit}>
+                <div>
+                    <label htmlFor="email-address" className="mb-2 block text-sm font-semibold text-text-secondary">
+                        Email address
+                    </label>
+                    <div className="relative">
+                        <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+                        <input
+                            id="email-address"
+                            name="email"
+                            type="email"
+                            required
+                            className={inputClass}
+                            placeholder="you@company.com"
+                            value={email}
+                            onChange={(event) => setEmail(event.target.value)}
+                        />
                     </div>
-                    <h2 className="mt-5 text-3xl font-bold text-white">Recruiter Login</h2>
-                    <p className="mt-2 text-sm text-white/70">
-                        Sign in to evaluate candidates on proof of work.
-                    </p>
                 </div>
 
-                <div className="rounded-3xl bg-bg-card shadow-card p-8">
-                    <form className="space-y-5" onSubmit={handleSubmit}>
-                        <div>
-                            <label htmlFor="email-address" className="block text-sm font-medium text-text-secondary mb-1">
-                                Email address
-                            </label>
-                            <input
-                                id="email-address"
-                                name="email"
-                                type="email"
-                                required
-                                className={inputClass}
-                                placeholder="you@company.com"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                            />
+                <div>
+                    <label htmlFor="password" className="mb-2 block text-sm font-semibold text-text-secondary">
+                        Password
+                    </label>
+                    <div className="relative">
+                        <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+                        <input
+                            id="password"
+                            name="password"
+                            type="password"
+                            required
+                            className={inputClass}
+                            placeholder="Enter password"
+                            value={password}
+                            onChange={(event) => setPassword(event.target.value)}
+                        />
+                    </div>
+                </div>
+
+                {error && (
+                    <div className="rounded-lg border border-error/30 bg-error/5 px-3 py-2 text-sm font-medium text-error">
+                        {error}
+                    </div>
+                )}
+
+                <div className="rounded-lg border border-primary/15 bg-primary-soft/70 p-4">
+                    <div className="flex items-start gap-3">
+                        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-white text-primary shadow-sm">
+                            <KeyRound className="h-4 w-4" />
                         </div>
                         <div>
-                            <label htmlFor="password" className="block text-sm font-medium text-text-secondary mb-1">
-                                Password
-                            </label>
-                            <input
-                                id="password"
-                                name="password"
-                                type="password"
-                                required
-                                className={inputClass}
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
-                        </div>
-
-                        {error && (
-                            <div className="rounded-xl border border-error/30 bg-error/5 px-3 py-2 text-sm text-error">
-                                {error}
-                            </div>
-                        )}
-
-                        <div className="rounded-2xl border border-primary/20 bg-primary-soft/60 p-4">
-                            <p className="text-sm font-semibold text-primary">Demo access for visitors</p>
-                            <p className="mt-1 text-xs text-text-secondary">
-                                Explore SignalStack with the shared demo recruiter account.
+                            <p className="text-sm font-bold text-primary">Demo access</p>
+                            <p className="mt-1 text-xs leading-5 text-text-secondary">
+                                Use the shared recruiter account to inspect the product.
                             </p>
-                            <div className="mt-3 space-y-1 font-mono text-xs text-text-primary">
-                                <div>
-                                    <span className="text-text-muted">Email:&nbsp;</span>
-                                    <span className="select-all">{DEMO_EMAIL}</span>
-                                </div>
-                                <div>
-                                    <span className="text-text-muted">Password:&nbsp;</span>
-                                    <span className="select-all">{DEMO_PASSWORD}</span>
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={fillDemoCredentials}
-                                className="mt-3 inline-flex items-center rounded-lg border border-primary px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary hover:text-white"
-                            >
-                                Use demo credentials
-                            </button>
                         </div>
+                    </div>
 
-                        <button
-                            type="submit"
-                            disabled={submitting}
-                            className="w-full rounded-xl bg-primary py-2.5 px-4 text-sm font-semibold text-white shadow-glow-sm transition-colors hover:bg-primary-hover disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-                        >
-                            {submitting ? 'Signing in…' : 'Sign in'}
-                        </button>
-                    </form>
+                    <div className="mt-4 grid gap-2 rounded-lg bg-white/70 p-3 font-mono text-xs text-text-primary">
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-text-muted">Email</span>
+                            <span className="select-all text-right">{DEMO_EMAIL}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-text-muted">Password</span>
+                            <span className="select-all">{DEMO_PASSWORD}</span>
+                        </div>
+                    </div>
 
-                    <p className="mt-6 text-center text-sm text-text-secondary">
-                        Have an invite?{' '}
-                        <Link to="/signup" className="font-semibold text-primary hover:underline">
-                            Create your account
-                        </Link>
-                    </p>
+                    <button
+                        type="button"
+                        onClick={fillDemoCredentials}
+                        className="mt-3 inline-flex items-center gap-2 rounded-lg border border-primary/25 bg-white px-3 py-2 text-xs font-bold text-primary shadow-sm hover:border-primary hover:bg-primary hover:text-white"
+                    >
+                        Use demo credentials
+                    </button>
                 </div>
 
-                <p className="mt-4 text-center text-xs text-white/60">
-                    New recruiter accounts require an admin invite.
-                </p>
-            </div>
-        </div>
+                <button
+                    type="submit"
+                    disabled={submitting}
+                    className="group inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-bold text-white shadow-glow-sm hover:bg-primary-hover disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                >
+                    {submitting ? 'Signing in...' : 'Sign in'}
+                    {!submitting && <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />}
+                </button>
+            </form>
+
+            <p className="mt-6 text-center text-sm text-text-secondary">
+                Have an invite?{' '}
+                <Link to="/signup" className="font-bold text-primary hover:underline">
+                    Create your account
+                </Link>
+            </p>
+        </AuthPageShell>
     );
 };
 
