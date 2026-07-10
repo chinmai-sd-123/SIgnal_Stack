@@ -2,6 +2,7 @@ import pytest
 
 from app.models.invite import InviteSubmission
 from app.routes.invite import _proof_payload_for_submission
+from app.schemas import ProofCreate
 from app.services.bulk_evaluation_service import candidate_id_for_submission
 
 
@@ -47,9 +48,37 @@ def test_invite_proof_payload_uses_resume_as_artifact_only_without_repo():
 
 
 @pytest.mark.unit
-def test_bulk_evaluation_candidate_id_prefers_candidate_email():
+def test_invite_proof_payload_with_repo_urls_validates_as_proof_schema():
     submission = InviteSubmission(
         id="sub-3",
+        candidate_name="Candidate Dev",
+        candidate_email="candidate@example.com",
+        github_username="candidate-dev",
+        repo_url="https://github.com/candidate-dev/auth-api",
+        repo_urls=[
+            "https://github.com/candidate-dev/auth-api",
+            "https://github.com/candidate-dev/web-app",
+        ],
+        resume_url="https://drive.google.com/resume",
+    )
+
+    proof = ProofCreate(
+        job_id="outcome-1",
+        candidate_id="candidate@example.com",
+        type="github",
+        payload=_proof_payload_for_submission(submission),
+    )
+
+    assert proof.payload["repo_urls"] == [
+        "https://github.com/candidate-dev/auth-api",
+        "https://github.com/candidate-dev/web-app",
+    ]
+
+
+@pytest.mark.unit
+def test_bulk_evaluation_candidate_id_prefers_candidate_email():
+    submission = InviteSubmission(
+        id="sub-4",
         candidate_name="Candidate Dev",
         candidate_email="candidate@example.com",
         github_username="candidate-dev",
