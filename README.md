@@ -1,119 +1,84 @@
 # SignalStack
 
-**Proof-of-work hiring infrastructure for technical teams.**
+**Evaluate software candidates on proof of work, not resumes.**
 
-SignalStack replaces resume guessing with evidence-backed technical evaluation. It decomposes a job into measurable outcomes, collects candidate repositories and artifacts, analyzes real code, and produces auditable hiring reports in which every score traces back to inspectable proof.
+SignalStack turns a job description into measurable outcomes, collects candidate GitHub repositories, analyzes the actual code, and produces an evidence-backed hiring report where every score links back to a real file, commit, or snippet.
+
+> This is a personal full-stack project, built to production-grade engineering standards — real authentication, database migrations, a background job queue, observability, and a fault-tolerant evaluation pipeline. It is a demonstration of how such a system is designed and operated, not a commercial product.
 
 | | |
 | --- | --- |
-| **Domain** | AI-assisted technical hiring / candidate evaluation |
-| **Backend** | FastAPI · SQLAlchemy · PostgreSQL (Neon) · Redis |
 | **Frontend** | React 18 · Vite · Tailwind CSS |
-| **AI** | OpenAI Responses API with strict structured outputs |
-| **Deployment** | Render (API) · Vercel (SPA) · Neon (DB) · Redis Cloud |
+| **Backend** | FastAPI · SQLAlchemy · PostgreSQL · Redis |
+| **AI** | OpenAI Responses API (strict structured outputs) |
+| **Hosting** | Vercel (web) · Render (API) · Neon (DB) · Redis Cloud |
+
+### Engineering highlights
+
+- **Fault-tolerant evaluation** — a failed LLM call never overwrites a valid report with a zero; failures are quarantined and safely retried.
+- **Two-stage scoring** — cheap deterministic screening for everyone, expensive LLM analysis only for top candidates.
+- **Background queue** — evaluations run asynchronously in Redis and survive process restarts.
+- **Real ops** — Alembic migrations, role-based access control, audit logs, and Prometheus-style metrics.
 
 ---
 
-## System Design
-
-### Architecture Overview
+## System Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Clients
-        R[Recruiter / Admin SPA]
-        C[Candidate Invite Page]
+    subgraph Frontend
+        SPA["React SPA — Recruiter and Admin"]
+        APPLY["Public Candidate Apply Page"]
     end
 
-    subgraph API["FastAPI Application (Render)"]
-        AUTH[Auth & RBAC]
-        ROUTES[REST Routes]
-        QUEUE[Evaluation Queue Producer]
-        WORKER[Background Evaluation Worker]
-        PIPE[Evaluation Pipeline]
-        METRICS["Metrics /metrics · /metrics/prometheus"]
+    subgraph Backend["Backend — FastAPI"]
+        API["REST API + Auth / RBAC"]
+        WORKER["Background Evaluation Worker"]
     end
 
     subgraph Data
-        PG[(PostgreSQL · Neon)]
-        REDIS[(Redis · queue + cache)]
+        DB[("PostgreSQL")]
+        REDIS[("Redis — queue and cache")]
     end
 
     subgraph External
-        GH[GitHub REST API]
-        OAI[OpenAI API]
-        LC[LeetCode GraphQL]
+        GH["GitHub API"]
+        OAI["OpenAI API"]
     end
 
-    R -->|HTTPS + Bearer token| ROUTES
-    C -->|Public invite token| ROUTES
-    ROUTES --> AUTH
-    ROUTES --> QUEUE
-    QUEUE --> REDIS
+    SPA --> API
+    APPLY --> API
+    API --> DB
+    API --> REDIS
     REDIS --> WORKER
-    WORKER --> PIPE
-    PIPE --> GH
-    PIPE --> OAI
-    PIPE --> LC
-    PIPE --> PG
-    ROUTES --> PG
-    WORKER --> METRICS
+    WORKER --> DB
+    WORKER --> GH
+    WORKER --> OAI
 ```
 
-### Evaluation Pipeline Components
+**How the pieces fit together:**
 
-```mermaid
-flowchart LR
-    SUB[Submission + Proofs] --> SCREEN[Deterministic Screening]
-    SCREEN -->|per-repo signals, best repo selected| RANK[Candidate Ranking]
-    RANK -->|top N| EV[Evidence Selector]
-    EV -->|best repo per signal| LLM[Grounded LLM Assessment]
-    LLM -->|strict JSON + citation check| SCORE[Scoring Engine]
-    SCORE --> REPORT[Versioned Outcome Report]
-    REPORT --> DECIDE[Recruiter Decision]
-    DECIDE -->|feedback| WEIGHTS[Signal / Task Weight Learning]
-    WEIGHTS -.->|applied on next run| SCORE
-    LLM -.->|failure| QUAR[Quarantine + Retry Queue]
-    QUAR -.-> SCREEN
-```
+- The **React SPA** serves recruiters and admins; a separate **public page** lets candidates apply through an invite link with no account.
+- The **FastAPI** layer handles auth, REST routes, and enqueues evaluation jobs. It stays stateless — all durable state lives in Postgres and Redis — so instances can restart or scale freely.
+- The **background worker** consumes jobs from Redis, calls the GitHub and OpenAI APIs, runs the scoring pipeline, and writes results back to Postgres.
+- **Redis** doubles as the job queue and a cache for GitHub responses and LLM outputs, so repeat evaluations of unchanged repos are near-free.
 
-Key design decisions:
+---
 
-- **Multi-repo evidence routing** — candidates submit up to 3 repositories; each outcome signal is evaluated against the repository with the strongest evidence for it.
-- **Deterministic-first, LLM-second** — every candidate gets a zero-cost deterministic screen; only top candidates receive LLM deep evaluation.
-- **Separated score dimensions** — capability, evidence confidence, production readiness, and authorship verification are independent, so one weak dimension never silently poisons another.
-- **Learning loop** — recruiter decisions adjust signal/task weights (bounded, audited, revertible) that feed back into future scoring.
-
-### Evaluation Reliability Model
-
-Evaluations are fault-tolerant by design. The system applies a **validated-write / merge-preserve** pattern:
-
-| Guarantee | Mechanism |
-| --- | --- |
-| No fake scores | LLM failures return an explicit `llm_failed` marker — never a silent `0.0`. |
-| All-or-nothing per candidate | A candidate with any failed interpretation is **quarantined**: removed from summaries, task rankings, and recommendations for that run. |
-| Previous results preserved | Reports are **append-only versions**; a new version is written only when it contains at least one successful result. A failed run never replaces the last valid report. |
-| Safe retries | Quarantined candidates are flipped back to a retryable state; the incremental merge re-evaluates only missing candidates, making retries **idempotent**. |
-| No duplicate work | Enqueueing is idempotent — one pending evaluation task per job; repeated "Evaluate" clicks return the existing task. |
-| Crash recovery | Tasks stuck in `processing` are recovered to pending on worker start; stale `evaluating` rows are re-queued; progress polling can revive the worker after a platform restart. |
-
-### Data Model
+## Data Model
 
 ```mermaid
 erDiagram
     RECRUITER ||--o{ JOB : owns
-    RECRUITER ||--o{ RECRUITER_INVITE : "invited by admin"
-    JOB ||--o{ OUTCOME : defines
-    JOB ||--o{ INVITE : publishes
-    JOB ||--o{ JOB_CANDIDATE : tracks
-    OUTCOME ||--o{ TASK : "evaluation signals"
-    OUTCOME ||--o{ PROOF : "candidate evidence"
-    OUTCOME ||--o{ EVALUATION : "versioned reports"
-    INVITE ||--o{ INVITE_SUBMISSION : receives
-    INVITE_SUBMISSION ||--o{ PROOF : generates
-    EVALUATION ||--o{ FEEDBACK : "recruiter decisions"
-    FEEDBACK ||--o{ SIGNAL_WEIGHT : adjusts
-    TASK ||--o{ TASK_WEIGHT_HISTORY : audits
+    JOB ||--o{ OUTCOME : "has"
+    JOB ||--o{ INVITE : "publishes"
+    OUTCOME ||--o{ TASK : "has signals"
+    OUTCOME ||--o{ PROOF : "scoped to"
+    OUTCOME ||--o{ EVALUATION : "produces reports"
+    INVITE ||--o{ INVITE_SUBMISSION : "receives"
+    INVITE_SUBMISSION ||--o{ PROOF : "creates"
+    EVALUATION ||--o{ FEEDBACK : "gets"
+    FEEDBACK ||--o{ SIGNAL_WEIGHT : "tunes"
 
     JOB {
         string id PK
@@ -135,7 +100,7 @@ erDiagram
     }
     INVITE_SUBMISSION {
         string id PK
-        string repo_url
+        string candidate_email
         json repo_urls
         string status
     }
@@ -152,66 +117,67 @@ erDiagram
         float fit_score
         string status
     }
-    SIGNAL_WEIGHT {
-        int id PK
-        string signal_name
-        float weight
-    }
 ```
 
-### Deployment Architecture
-
-```mermaid
-flowchart LR
-    U[Users] --> V[Vercel · React SPA]
-    U --> RD[Render · FastAPI + in-process worker]
-    V -->|REST| RD
-    RD --> N[(Neon · serverless PostgreSQL)]
-    RD --> RC[(Redis Cloud · queue + cache)]
-    RD --> GH[GitHub API]
-    RD --> OAI[OpenAI API]
-```
-
-- **Stateless API** — all durable state lives in PostgreSQL and Redis, so Render instances can restart or scale without data loss.
-- **Schema management** — Alembic migrations (`backend/alembic/`) are the source of truth; a narrow runtime schema guard self-heals recently added columns at startup so deploys never race migrations.
-- **Queue durability** — evaluation tasks live in Redis and survive process restarts; the in-memory queue is a development fallback.
+**Core idea:** a `JOB` breaks into `OUTCOME`s (capabilities to hire for), each with `TASK`s (verifiable signals). Candidates apply through an `INVITE`, creating an `INVITE_SUBMISSION` and one `PROOF` per outcome. The pipeline reads proofs and writes versioned `EVALUATION` reports. Recruiter `FEEDBACK` tunes `SIGNAL_WEIGHT`s that feed back into future scoring.
 
 ---
 
-## Technology Stack
+## How Evaluation Works
 
-| Layer | Technology | Notes |
-| --- | --- | --- |
-| API | FastAPI, Pydantic v2 | Typed request/response schemas, OpenAPI docs at `/docs` |
-| ORM / DB | SQLAlchemy 2, PostgreSQL, Alembic | SQLite fallback for local development |
-| Queue / cache | Redis | Job evaluation queue, GitHub + LLM response cache |
-| AI | OpenAI Responses API | Strict JSON-schema outputs, model routing (eval vs fast model), retries with jittered backoff, per-model cost tracking |
-| Auth | PBKDF2-SHA256, signed bearer tokens | Invite-only recruiter signup, admin bootstrap |
-| Frontend | React 18, Vite, Tailwind CSS, Recharts, Lucide | Design tokens in `index.css` + `tailwind.config.js` |
-| Observability | JSON + Prometheus metrics | Latency histograms, token/cost counters, cache hit rates |
+The pipeline is deliberately **deterministic-first, LLM-second** to control cost and keep scores explainable:
 
-## Folder Structure
+1. **Screen** every candidate with fast, deterministic checks (tests, CI, Docker, commit history, framework detection). No LLM cost.
+2. **Rank** candidates and send only the top *N* to deep analysis.
+3. **Select evidence** — candidates can submit up to 3 repos, and each outcome signal is judged against the repo that best proves it.
+4. **Assess** with the LLM using strict JSON output and citation checks so scores stay grounded in real code.
+5. **Score** across independent dimensions — capability, evidence confidence, production readiness, and authorship — so one weak signal never silently drags down the rest.
+6. **Learn** — recruiter decisions adjust signal/task weights (bounded, audited, revertible).
+
+### Reliability: failed evaluations never corrupt good data
+
+The evaluation flow uses a **validated-write / merge-preserve** approach so a temporary outage (e.g. the LLM being unavailable) can't leave bad data behind:
+
+| Guarantee | How |
+| --- | --- |
+| No fake scores | A failed LLM call returns an explicit failure marker, never a silent `0.0`. |
+| All-or-nothing per candidate | Any candidate with a failed step is **quarantined** — kept out of the report entirely for that run. |
+| Previous results preserved | Reports are append-only versions; a new one is written only if it contains a real result. A failed run never overwrites the last valid report. |
+| Safe, idempotent retries | Quarantined candidates flip back to retryable; re-running re-evaluates only the missing ones. |
+| No duplicate work | Enqueueing is idempotent — one pending job per posting; repeated clicks reuse it. |
+
+---
+
+## Tech Stack
+
+| Layer | Choices |
+| --- | --- |
+| Frontend | React 18, Vite, Tailwind CSS, Recharts, Lucide |
+| API | FastAPI, Pydantic v2 (typed schemas, auto OpenAPI docs) |
+| Data | PostgreSQL + SQLAlchemy 2, Alembic migrations (SQLite fallback for local dev) |
+| Queue / cache | Redis (in-memory fallback for local dev) |
+| AI | OpenAI Responses API — strict JSON schema, model routing, retries with backoff, cost tracking |
+| Auth | PBKDF2-SHA256 passwords, signed bearer tokens, invite-only signup |
+| Observability | JSON + Prometheus metrics (latency, tokens, cost, cache hits) |
+
+## Project Structure
 
 ```text
 backend/
   app/
-    config/       Runtime config and database session management
-    constants/    Shared category definitions
-    models/       SQLAlchemy models
-    pipeline/     Evaluator, evidence selector, signal extractor, scoring engine,
-                  identity verifier, feedback learning
-    routes/       FastAPI route handlers
-    schemas/      Pydantic request/response schemas
-    services/     LLM, GitHub, LeetCode, Redis queue/cache, auth, CRUD
-    utils/        Shared helpers
-  alembic/        Database migrations
-  tests/          Unit and integration tests
+    config/     Config and database session
+    models/     SQLAlchemy models
+    pipeline/   Evaluator, evidence selector, scoring engine, feedback learning
+    routes/     FastAPI route handlers
+    schemas/    Pydantic request/response schemas
+    services/   LLM, GitHub, LeetCode, Redis queue/cache, auth
+  alembic/      Database migrations
+  tests/        Unit and integration tests
 frontend/
   src/
-    components/   Shared UI (layout, evidence cards, modals, charts)
-    pages/        Route-level views
-    api.js        API client
-    index.css     Design system tokens and component classes
+    components/ Shared UI (layout, evidence cards, charts)
+    pages/      Route-level views
+    index.css   Design tokens and component classes
 ```
 
 ## API Overview
@@ -219,38 +185,13 @@ frontend/
 | Area | Endpoints |
 | --- | --- |
 | Auth | `POST /recruiter/login`, `POST /recruiter/signup`, `GET /recruiter/me` |
-| Jobs | `POST/GET/PATCH/DELETE /jobs…` |
-| Outcomes & signals | `POST /outcomes`, `PATCH/DELETE /outcomes/{id}`, `POST /plugin/suggest-tasks` |
-| Candidate intake | `POST /jobs/{id}/invites`, `GET /invites/{token}`, `POST /invites/{token}/submit` (supports `repo_urls`, max 3) |
-| Evaluation | `POST /jobs/{id}/evaluations/queue`, `GET /jobs/{id}/evaluations/progress`, `GET /plugin/status/{outcome_id}` |
-| Learning | `POST /plugin/feedback`, `POST /feedback/task-weight`, `PUT /feedback/reset/{job_id}` |
-| Admin | `GET /admin/signal-weights`, `/admin/audit-logs`, `/admin/llm-logs`, `/admin/task-weight-history` |
+| Jobs & outcomes | `POST/GET/PATCH/DELETE /jobs`, `POST/PATCH/DELETE /outcomes/{id}` |
+| Candidate intake | `POST /jobs/{id}/invites`, `GET /invites/{token}`, `POST /invites/{token}/submit` |
+| Evaluation | `POST /jobs/{id}/evaluations/queue`, `GET /jobs/{id}/evaluations/progress` |
+| Learning & admin | `POST /plugin/feedback`, `GET /admin/signal-weights`, `/admin/audit-logs` |
 | Ops | `GET /metrics`, `GET /metrics/prometheus` |
 
-## Error Handling Strategy
-
-- **External calls** (GitHub, OpenAI, LeetCode): retried with exponential backoff + jitter on transient failures (timeouts, connection resets, 429, 5xx); GitHub falls back to unauthenticated access on token failure.
-- **LLM failures**: explicitly marked, quarantined per candidate, never persisted as scores (see Reliability Model above).
-- **Background tasks**: failures mark the affected submission/candidate `failed` with an audit trail; the standard queue flow retries them.
-- **API layer**: access violations return 403/404 via ownership checks; public invite endpoints validate token, expiry, and duplicate submissions.
-- **Frontend**: explicit error, loading (skeleton), and empty states on every primary view; a server wake-up banner covers cold starts.
-
-## Security Considerations
-
-- Role-based access control: admin / recruiter / public candidate, enforced in the backend on every job-scoped route (not only hidden in the UI).
-- Recruiter signup is invite-only; the first `ADMIN_EMAIL` login bootstraps the admin account.
-- Passwords hashed with PBKDF2-SHA256 (salted); tokens signed with `AUTH_SECRET`.
-- Evidence isolation: proofs are scoped by job + outcome + candidate + submission, preventing cross-candidate leakage.
-- No secrets in the repository: configuration via environment variables; Alembic reads `DATABASE_URL` at runtime.
-- Candidate-facing pages never expose recruiter data; invite tokens are unguessable UUIDs with expiry and revocation.
-
-## Scalability Considerations
-
-- **Two-stage evaluation** keeps LLM cost sublinear: deterministic screening for all candidates, deep LLM evaluation for the top N (configurable).
-- **Batched LLM calls**: one call per candidate × outcome (not per signal) — a 5-signal outcome costs 1 call, not 5.
-- **Caching**: GitHub trees/files/commits and LLM responses cached in Redis; repeat evaluations of unchanged repos are near-free.
-- **Incremental report merges**: late applicants trigger evaluation only for missing candidates, never a full re-run.
-- **Horizontal path**: the worker is queue-driven and stateless; it can be lifted into a dedicated worker service (Celery/RQ) without API changes.
+Full interactive docs are available at `/docs` when the API is running.
 
 ## Getting Started
 
@@ -260,54 +201,56 @@ cd backend
 python -m venv .venv && .venv\Scripts\Activate.ps1     # or: source .venv/bin/activate
 pip install -r requirements.txt -r requirements-test.txt
 cp .env.example .env                                    # fill in your values
-alembic upgrade head                                    # fresh DB (existing DB: alembic stamp head)
+alembic upgrade head                                    # existing DB: alembic stamp head
 uvicorn app.main:app --port 8000 --reload
 
 # Frontend
 cd frontend && npm install && npm run dev
 ```
 
-App: `http://localhost:5173` · API docs: `http://localhost:8000/docs` · Metrics: `http://localhost:8000/metrics`
+App → `http://localhost:5173` · API docs → `http://localhost:8000/docs`
 
-**Demo access:** `python seed_demo_auth.py` seeds a demo recruiter (`demo@signalstack.dev` / `Demo@12345`, shown on the login page), an admin account, and a sample job.
+**Try it instantly:** run `python backend/seed_demo_auth.py` to seed a demo recruiter (`demo@signalstack.dev` / `Demo@12345`, also shown on the login page) plus a sample job.
 
 <details>
-<summary><strong>Environment variables</strong></summary>
+<summary><strong>Key environment variables</strong></summary>
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | Yes | Signal generation and grounded assessment. |
-| `GITHUB_TOKEN` | Yes | Repository and commit analysis. |
-| `DATABASE_URL` | Recommended | PostgreSQL connection (SQLite fallback if unset). |
-| `REDIS_URL` | Recommended | Durable queue + cache (in-memory fallback if unset). |
-| `AUTH_SECRET` | Production | Token-signing secret. |
-| `ADMIN_EMAIL` | Production | Bootstraps the admin account on first login. |
-| `OPENAI_MODEL` | No | Primary model (default `gpt-5-mini`). |
-| `OPENAI_EVAL_MODEL` / `OPENAI_FAST_MODEL` | No | Route deep assessment vs high-volume calls to different models. |
-| `OPENAI_REASONING_EFFORT` / `OPENAI_MAX_OUTPUT_TOKENS` | No | Optional tuning for reasoning-capable models. |
-| `LLM_INPUT_COST_PER_1M` / `LLM_OUTPUT_COST_PER_1M` | No | Price overrides for cost metrics. |
-| `DEMO_RECRUITER_EMAIL` / `DEMO_RECRUITER_PASSWORD` | No | Demo seed credentials. |
-| `WORKER_THREADS`, `PUBLIC_BASE_URL`, `DEBUG` | No | Worker concurrency, invite-link base URL, verbose logging. |
+| `OPENAI_API_KEY` | Yes | Signal generation and grounded assessment |
+| `GITHUB_TOKEN` | Yes | Repository and commit analysis |
+| `DATABASE_URL` | Recommended | PostgreSQL (SQLite fallback if unset) |
+| `REDIS_URL` | Recommended | Queue + cache (in-memory fallback if unset) |
+| `AUTH_SECRET` | Production | Token-signing secret |
+| `ADMIN_EMAIL` | Production | Bootstraps the admin account on first login |
+| `OPENAI_MODEL` / `OPENAI_EVAL_MODEL` / `OPENAI_FAST_MODEL` | No | Model selection and routing |
+
+See `backend/.env.example` for the full list.
 
 </details>
 
-### Quality gates
+## Quality Gates
 
 ```bash
-python -m pytest backend/tests -q
-cd frontend && npm run lint && npm run build
+python -m pytest backend/tests -q          # backend tests
+cd frontend && npm run lint && npm run build   # frontend checks
 ```
+
+## Notes on Scale & Security
+
+- **Cost stays sublinear** — deterministic screening for all, LLM only for top candidates, plus one batched LLM call per candidate × outcome (not per signal).
+- **Access control is enforced server-side** — admin / recruiter / candidate roles are checked on every job-scoped route, not just hidden in the UI.
+- **Data is isolated** — proofs are scoped by job, outcome, candidate, and submission, so one candidate's evidence can never leak into another's report.
+- **No secrets in the repo** — everything sensitive comes from environment variables.
 
 ## Future Enhancements
 
-- Dedicated worker service (Celery/RQ/Dramatiq) with dead-letter queue
-- OpenTelemetry tracing and external metrics backend
+- Move the worker into a dedicated service (Celery / RQ) with a dead-letter queue
 - Embedding-based evidence retrieval for large monorepos
-- Evaluation regression/calibration datasets and prompt versioning
-- Organization & team permissions, shared jobs, billing scopes
+- Calibration datasets and prompt versioning for evaluation consistency
 - Exportable PDF reports and shareable report links
-- Realtime evaluation progress via SSE/WebSockets
+- Realtime progress via SSE / WebSockets
 
 ---
 
-**License:** Proprietary. All rights reserved.
+Built as a personal project to explore production-grade full-stack and applied-AI engineering.
