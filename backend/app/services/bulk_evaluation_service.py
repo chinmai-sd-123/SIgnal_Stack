@@ -713,6 +713,7 @@ def _deep_evaluate_top_candidates(
     deep_scores = defaultdict(list)
     deep_payloads = defaultdict(list)
     evaluations_created = 0
+    failed_candidate_ids: set = set()
 
     for outcome in outcomes:
         outcome_id = outcome.id
@@ -755,6 +756,19 @@ def _deep_evaluate_top_candidates(
         else:
             delta_evaluation = evaluator.evaluate(outcome_schema, proof_schemas, signals_map, weights=weights)
 
+        failed_candidate_ids.update(delta_evaluation.failed_candidate_ids or [])
+
+        # Persistence guard: never store a report version that contains no new
+        # successful results. The previous valid report (if any) stays the
+        # latest, and quarantined candidates are re-queued for retry — so a
+        # transient LLM outage can never overwrite good data with zeros.
+        if not delta_evaluation.candidate_summaries:
+            logger.warning(
+                "Skipping evaluation write for outcome %s — no successful candidate results (failed: %s).",
+                outcome_id, sorted(delta_evaluation.failed_candidate_ids or []),
+            )
+            continue
+
         evaluation = (
             _merge_evaluation_response(existing_response, delta_evaluation)
             if existing_response
@@ -778,6 +792,10 @@ def _deep_evaluate_top_candidates(
             })
 
     for candidate_id, scores in deep_scores.items():
+        if candidate_id in failed_candidate_ids:
+            # Never persist a deep score for a candidate whose evaluation
+            # failed on any outcome this run — they will be retried whole.
+            continue
         candidate = db.query(JobCandidate).filter(
             JobCandidate.job_id == job_id,
             JobCandidate.candidate_id == candidate_id,
@@ -799,8 +817,38 @@ def _deep_evaluate_top_candidates(
             },
         }
 
+    # Flip quarantined candidates back to a retryable state. Their previous
+    # valid scores/report entries are preserved; re-clicking Evaluate (or the
+    # next queue run) re-processes only them, and the incremental merge fills
+    # only the outcomes where they are missing — making retries idempotent.
+    if failed_candidate_ids:
+        _mark_candidates_retryable(db, job_id, failed_candidate_ids)
+
     db.commit()
     return evaluations_created
+
+
+def _mark_candidates_retryable(db, job_id: str, candidate_ids: set) -> None:
+    """Reset failed candidates so the standard queue flow retries them."""
+    now = utc_now().isoformat()
+    for candidate_id in candidate_ids:
+        candidate = db.query(JobCandidate).filter(
+            JobCandidate.job_id == job_id,
+            JobCandidate.candidate_id == candidate_id,
+        ).first()
+        if candidate:
+            candidate.status = "failed"
+            candidate.evaluation_data = {
+                **(candidate.evaluation_data or {}),
+                "stage": "deep_eval_failed",
+                "deep_eval_failed_at": now,
+                "retryable": True,
+            }
+
+    submissions = db.query(InviteSubmission).filter(InviteSubmission.job_id == job_id).all()
+    for submission in submissions:
+        if candidate_id_for_submission(submission) in candidate_ids:
+            submission.status = "failed"
 
 
 def evaluate_job_applications_sync(
@@ -897,12 +945,45 @@ def evaluate_job_applications_sync(
         db.close()
 
 
+def _find_pending_job_evaluation_task(job_id: str) -> Optional[str]:
+    """
+    Idempotent enqueue guard: return the id of an already pending/processing
+    evaluation task for this job, if one exists. Prevents duplicate queue
+    entries when Evaluate is clicked repeatedly.
+    """
+    if _redis_available():
+        try:
+            for key in (REDIS_JOB_EVAL_QUEUE, REDIS_JOB_EVAL_PROCESSING):
+                for item in cache.redis_client.lrange(key, 0, -1):
+                    payload = _redis_payload(item)
+                    if payload and payload.get("job_id") == job_id and payload.get("task_id"):
+                        return str(payload["task_id"])
+        except Exception as exc:
+            logger.warning("Could not check Redis for pending evaluation task: %s", exc)
+        return None
+
+    task_name = f"evaluate_job:{job_id}"
+    active_statuses = {TaskStatus.PENDING, TaskStatus.RUNNING}
+    with worker_queue._lock:
+        for task_id, task in worker_queue.tasks.items():
+            if task.name == task_name and task.status in active_statuses:
+                return task_id
+    return None
+
+
 def queue_job_evaluation(
     job_id: str,
     deep_limit: int = 25,
     candidate_limit: Optional[int] = None,
     include_deep_evaluation: bool = True,
 ) -> str:
+    # Idempotency: one pending evaluation task per job. Re-clicking Evaluate
+    # returns the existing task instead of stacking duplicates.
+    existing_task_id = _find_pending_job_evaluation_task(job_id)
+    if existing_task_id:
+        logger.info("Evaluation for job %s already queued as task %s — reusing.", job_id, existing_task_id)
+        return existing_task_id
+
     if _redis_available():
         init_redis_job_evaluation_worker()
         task_id = str(uuid.uuid4())[:8]

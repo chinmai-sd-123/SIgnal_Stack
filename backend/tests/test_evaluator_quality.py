@@ -293,3 +293,108 @@ def test_multi_repo_routes_each_task_to_best_repo():
     )
     assert chosen == "https://github.com/acme/rag-project"
     assert evidence[0].ref == "FILE:rag/ingest.py"
+
+
+@pytest.mark.unit
+def test_llm_failure_quarantines_candidate_instead_of_zero_score(monkeypatch):
+    """A transient LLM failure must never persist as a real zero score."""
+
+    class Outcome:
+        id = "outcome-1"
+        job_id = "job-1"
+        title = "Build AI workflow"
+        description = "Candidate can ship an AI workflow."
+
+    class Task:
+        def __init__(self, task_id, name):
+            self.id = task_id
+            self.name = name
+            self.priority = "High"
+            self.weight = 0.5
+
+    outcome = Outcome()
+    outcome.tasks = [Task("task-1", "Send code to an LLM service")]
+
+    class FakeExtractor:
+        def extract_evidence(self, **kwargs):
+            return [Evidence(type="code_snippet", ref="FILE:app/main.py", snippet="def x(): pass")]
+
+        def extract_best_evidence(self, repo_urls, task_title, context="", artifact_link=None, keywords=None):
+            chosen = repo_urls[0] if repo_urls else ""
+            return chosen, self.extract_evidence()
+
+        def extract_authorship_signals(self, *args, **kwargs):
+            return Evidence(type="authorship_context", ref="AUTHORSHIP", snippet="ok")
+
+    class FakeLLM:
+        def interpret_outcome_signals(self, outcome_description, task_evidence, payload=None, tracking_context=None):
+            cand = (tracking_context or {}).get("candidate_id")
+            if cand == "broken@example.com":
+                return {
+                    item["task_id"]: {
+                        "strength": 0.0,
+                        "justification": "AI evaluation temporarily unavailable.",
+                        "relevant_evidence": "Error",
+                        "llm_failed": True,
+                        "dimensions": {},
+                    }
+                    for item in task_evidence
+                }
+            return {
+                item["task_id"]: {
+                    "strength": 0.8,
+                    "justification": "Working implementation found.",
+                    "relevant_evidence": "def x(): pass",
+                    "dimensions": {},
+                }
+                for item in task_evidence
+            }
+
+    monkeypatch.setattr("app.services.llm.OpenAILLMService", lambda: FakeLLM())
+
+    evaluator = Evaluator()
+    evaluator.extractor = FakeExtractor()
+
+    def proof(email):
+        return schemas.ProofCreate(
+            job_id="outcome-1", candidate_id=email, type="github",
+            payload={"repo_url": "https://github.com/acme/x", "candidate_email": email},
+        )
+
+    result = evaluator.evaluate_batched(
+        outcome,
+        [proof("ok@example.com"), proof("broken@example.com")],
+        {"ok@example.com": {}, "broken@example.com": {}},
+    )
+
+    summary_ids = [s.candidate_id for s in result.candidate_summaries]
+    assert "ok@example.com" in summary_ids
+    assert "broken@example.com" not in summary_ids
+    assert result.failed_candidate_ids == ["broken@example.com"]
+    # Quarantined candidate must not appear in any task ranking either
+    for alloc in result.work_allocation:
+        assert all(c.candidate_id != "broken@example.com" for c in alloc.top_candidates)
+        assert alloc.recommended_candidate != "broken@example.com"
+
+
+@pytest.mark.unit
+def test_quarantine_rebuilds_allocation_recommendation():
+    from app.pipeline.evaluator import _quarantine_failed_candidates
+    from app.schemas.evaluation import CandidateScore, WorkAllocation
+
+    alloc = WorkAllocation(
+        task_id="t1", task_title="Signal", recommended_candidate="failed@x.com",
+        confidence=0.9, reasons=["was best"], evidence=[],
+        top_candidates=[
+            CandidateScore(candidate_id="failed@x.com", score=0.9, justification="was best"),
+            CandidateScore(candidate_id="ok@x.com", score=0.7, justification="solid work"),
+        ],
+    )
+    stats = {"failed@x.com": {"total_score": 0.9}, "ok@x.com": {"total_score": 0.7}}
+
+    _quarantine_failed_candidates([alloc], stats, {"failed@x.com"})
+
+    assert "failed@x.com" not in stats
+    assert alloc.recommended_candidate == "ok@x.com"
+    assert alloc.confidence == 0.7
+    assert [c.candidate_id for c in alloc.top_candidates] == ["ok@x.com"]

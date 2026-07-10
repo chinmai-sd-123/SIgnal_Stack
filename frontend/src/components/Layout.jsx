@@ -76,6 +76,7 @@ export default function Layout({ children }) {
                                         <Link
                                             key={item.name}
                                             to={item.href}
+                                            aria-current={isActive ? 'page' : undefined}
                                             className={`inline-flex items-center px-4 pt-1 border-b-2 text-sm font-medium transition-colors duration-200 gap-2 ${isActive
                                                 ? 'border-primary text-primary'
                                                 : 'border-transparent text-text-secondary hover:border-gray-300 hover:text-text-primary'
@@ -107,6 +108,8 @@ export default function Layout({ children }) {
                         <div className="-mr-2 flex items-center sm:hidden">
                             <button
                                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                                aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+                                aria-expanded={mobileMenuOpen}
                                 className="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-primary-soft focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
                             >
                                 {mobileMenuOpen ? (

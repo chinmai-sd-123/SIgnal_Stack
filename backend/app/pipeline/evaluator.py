@@ -27,6 +27,37 @@ def _repo_candidates(payload: Dict) -> List[str]:
     return repos
 
 
+def _quarantine_failed_candidates(
+    allocations: List,
+    candidate_stats: Dict[str, Dict],
+    failed_candidates: set,
+) -> None:
+    """
+    Remove quarantined candidates from allocations and stats in place.
+
+    A candidate whose LLM interpretation failed must not appear anywhere in
+    the stored report: not as a summary, not in task rankings, and not as a
+    recommended candidate. Their previous valid results (if any) are preserved
+    by the merge layer, and the persistence layer flips them back to a
+    retryable state.
+    """
+    if not failed_candidates:
+        return
+
+    for cand_id in failed_candidates:
+        candidate_stats.pop(cand_id, None)
+
+    for alloc in allocations:
+        kept = [c for c in (alloc.top_candidates or []) if c.candidate_id not in failed_candidates]
+        alloc.top_candidates = kept
+        if alloc.recommended_candidate in failed_candidates:
+            best = kept[0] if kept else None
+            alloc.recommended_candidate = best.candidate_id if best else "None"
+            alloc.confidence = round(best.score, 2) if best else 0.0
+            alloc.reasons = [best.justification] if best and best.justification else []
+            alloc.evidence = best.evidence if best and best.evidence else []
+
+
 def _avg_dimensions(summaries: List) -> Dict:
     """Average dimension scores across all evaluated candidates."""
     dim_totals = {}
@@ -173,7 +204,8 @@ class Evaluator:
         """
         allocations = []
         global_signals_used = set()
-        
+        failed_candidates = set()  # LLM failures → quarantined, never scored
+
         # NEW: Track per-candidate stats for summary
         candidate_stats = {}  # {cand_id: {total_score, task_count, wins, dimensions}}
         
@@ -302,11 +334,17 @@ class Evaluator:
                     },
                 )
                 
+                # Quarantine on LLM failure: this is a transient error, not a
+                # real zero score. Skip recording anything for this candidate.
+                if interpretation.get("llm_failed"):
+                    failed_candidates.add(cand_id)
+                    continue
+
                 signal_strength = interpretation.get("strength", 0.0)
                 justification = interpretation.get("justification", "No justification provided.")
                 relevant_evidence_text = interpretation.get("relevant_evidence", "")
                 dims = interpretation.get("dimensions")
-                
+
                 # Add the LLM's key finding as a synthesized evidence item
                 if relevant_evidence_text and relevant_evidence_text not in ("None", "Error", ""):
                     task_evidence.insert(0, schemas.Evidence(
@@ -373,6 +411,11 @@ class Evaluator:
             alloc.top_candidates = top_candidates
             allocations.append(alloc)
 
+        # Quarantine failed candidates from allocations and stats. Their tasks
+        # that succeeded before a later failure must not survive either — a
+        # candidate is either fully evaluated or fully retried.
+        _quarantine_failed_candidates(allocations, candidate_stats, failed_candidates)
+
         # Calculate overall fit score (Weighted Average)
         total_fit = 0.0
         total_possible_weight = 0.0
@@ -426,7 +469,7 @@ class Evaluator:
             top_capability = candidate_summaries[0].capability_score or raw_final
             top_quality = _candidate_quality(top_signals, top_capability, weights)
             scoring = top_quality["scoring"]
-            all_risk_flags = scoring.risk_flags
+            all_risk_flags = scoring.risk_flags if scoring else []
             # Let direct task evidence lead for early applications. Deterministic
             # project-health signals still matter, but missing tests/CI should
             # not overpower a relevant working implementation.
@@ -453,7 +496,8 @@ class Evaluator:
             risk_flags=sorted(all_risk_flags) if all_risk_flags else [],
             human_action_required=True,
             dimensions=_avg_dimensions(candidate_summaries),
-            candidate_summaries=candidate_summaries
+            candidate_summaries=candidate_summaries,
+            failed_candidate_ids=sorted(failed_candidates),
         )
 
     def evaluate_batched(self, outcome: schemas.OutcomeCreate, proofs: List[schemas.ProofCreate], signals_map: Dict[str, Dict], weights: Dict[str, float] = None) -> schemas.EvaluationResponse:
@@ -467,6 +511,7 @@ class Evaluator:
         tasks = list(getattr(outcome, "tasks", []) or [])
         allocations = []
         global_signals_used = set()
+        failed_candidates = set()  # LLM failures → quarantined, never scored
         candidate_stats = {}
         task_scores: Dict[str, List[Dict]] = {self._task_key(task, index): [] for index, task in enumerate(tasks)}
         task_lookup = {self._task_key(task, index): task for index, task in enumerate(tasks)}
@@ -594,6 +639,18 @@ class Evaluator:
                 },
             )
 
+            # Quarantine on any LLM failure for this candidate: a candidate is
+            # either fully evaluated or fully retried — partial results must
+            # never be persisted as final scores.
+            if any(item.get("llm_failed") for item in interpretations.values()):
+                failed_candidates.add(cand_id)
+                candidate_stats.pop(cand_id, None)
+                logger.warning(
+                    "LLM interpretation failed for candidate %s on outcome %s — quarantined for retry.",
+                    cand_id, getattr(outcome, "id", None),
+                )
+                continue
+
             for task_key, evidence_meta in task_evidence_by_key.items():
                 task = evidence_meta["task"]
                 task_evidence = evidence_meta["evidence"]
@@ -674,6 +731,7 @@ class Evaluator:
             signals_map,
             global_signals_used,
             weights,
+            failed_candidates,
         )
 
     def _task_key(self, task, index: int) -> str:
@@ -687,7 +745,11 @@ class Evaluator:
         signals_map: Dict[str, Dict],
         global_signals_used,
         weights: Dict[str, float] = None,
+        failed_candidates: set = None,
     ) -> schemas.EvaluationResponse:
+        failed_candidates = failed_candidates or set()
+        _quarantine_failed_candidates(allocations, candidate_stats, failed_candidates)
+
         total_fit = 0.0
         total_possible_weight = 0.0
         all_risk_flags: List[str] = []
@@ -729,7 +791,7 @@ class Evaluator:
             top_capability = candidate_summaries[0].capability_score or raw_final
             top_quality = _candidate_quality(top_signals, top_capability, weights)
             scoring = top_quality["scoring"]
-            all_risk_flags = scoring.risk_flags
+            all_risk_flags = scoring.risk_flags if scoring else []
             final_score = candidate_summaries[0].overall_score
         else:
             final_score = round(raw_final, 3)
@@ -754,6 +816,7 @@ class Evaluator:
             human_action_required=True,
             dimensions=_avg_dimensions(candidate_summaries),
             candidate_summaries=candidate_summaries,
+            failed_candidate_ids=sorted(failed_candidates),
         )
 
     def _build_task_context(self, outcome, task) -> str:

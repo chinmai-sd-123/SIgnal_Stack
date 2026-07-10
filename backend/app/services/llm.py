@@ -360,6 +360,7 @@ class OpenAILLMService:
                 "strength": 0.0,
                 "justification": "API Key missing.",
                 "relevant_evidence": "None",
+                "llm_failed": True,
                 "dimensions": {k: 0.0 for k in [
                     "project_completion", "engineering_quality",
                     "communication", "innovation", "depth_novelty"
@@ -539,10 +540,13 @@ Respond with JSON only. No explanation outside the JSON.
 
         except Exception as e:
             logger.warning("[LLM] Interpretation error: %s", e)
+            # llm_failed marks this as a transient failure, NOT a real zero
+            # score. The evaluator must quarantine it instead of persisting it.
             return {
                 "strength": 0.0,
-                "justification": "Error processing evidence via AI.",
+                "justification": "AI evaluation temporarily unavailable. This candidate will be retried.",
                 "relevant_evidence": "Error",
+                "llm_failed": True,
                 "dimensions": {k: 0.0 for k in [
                     "project_completion", "engineering_quality",
                     "communication", "innovation", "depth_novelty"
@@ -569,10 +573,15 @@ Respond with JSON only. No explanation outside the JSON.
         ]
 
         def empty_result(task_id: str, reason: str = "No interpretation available.") -> Dict[str, Any]:
+            # Every empty result in this method represents a failure to obtain a
+            # real interpretation (missing key, transport error, or the model
+            # omitting a task). Marking llm_failed lets the evaluator quarantine
+            # the candidate instead of persisting a fake zero score.
             return {
                 "strength": 0.0,
                 "justification": reason,
                 "relevant_evidence": "None",
+                "llm_failed": True,
                 "dimensions": {key: 0.0 for key in dimension_keys},
             }
 

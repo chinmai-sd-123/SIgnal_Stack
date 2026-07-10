@@ -256,11 +256,17 @@ export default function EvaluationView() {
     }, [evaluation, comparisonCandidates]);
 
     if (loading) return (
-        // ... loading state ...
-        <div className="flex flex-col items-center justify-center min-h-[60vh]">
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent mb-4"></div>
-            <h2 className="heading-2">Evaluating Proofs...</h2>
-            <p className="text-gray-500 mt-2">Extracting signals • Allocating tasks • Verifying constraints</p>
+        <div className="space-y-6" aria-busy="true" aria-label="Loading evaluation report">
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary border-t-transparent mb-4"></div>
+                <h2 className="heading-2">Evaluating Proofs…</h2>
+                <p className="text-gray-500 mt-2">Extracting signals • Allocating tasks • Verifying constraints</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="skeleton-card" style={{ height: '180px' }} />
+                <div className="skeleton-card" style={{ height: '180px' }} />
+            </div>
+            <div className="skeleton-card" style={{ height: '260px' }} />
         </div>
     );
 

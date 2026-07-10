@@ -59,6 +59,10 @@ class EvaluationResponse(BaseModel):
     raw_output: Optional[Dict[str, Any]] = None
     # NEW: Per-candidate performance summary for dashboard
     candidate_summaries: List[CandidateSummary] = []
+    # Candidates whose LLM interpretation failed (transient error). They are
+    # excluded from candidate_summaries, must not be persisted as scored, and
+    # are flipped back to a retryable state by the persistence layer.
+    failed_candidate_ids: List[str] = []
 
 class EvaluationSummary(BaseModel):
     job_id: str

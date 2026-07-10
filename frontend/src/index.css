@@ -539,3 +539,120 @@
     }
   }
 }
+
+/* ========================================
+  ACCESSIBILITY & INTERACTION STATES
+   ======================================== */
+@layer base {
+
+  /* Visible keyboard focus everywhere, without hurting mouse users */
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: var(--primary-soft);
+    color: var(--primary);
+  }
+
+  /* Respect users who prefer reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+
+  /* Disabled state for every button variant */
+  .btn:disabled,
+  .btn[aria-disabled='true'] {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
+  }
+
+  .btn-sm {
+    padding: 8px 16px;
+    font-size: 13px;
+    border-radius: 10px;
+  }
+
+  .btn-danger {
+    @apply btn text-white;
+    background: linear-gradient(135deg, #a83a34 0%, #c2413b 100%);
+    box-shadow: 0 6px 18px rgba(194, 65, 59, 0.25);
+  }
+
+  .btn-danger:hover {
+    box-shadow: 0 10px 26px rgba(194, 65, 59, 0.32);
+    transform: translateY(-1px);
+  }
+
+  /* ========== SKELETON LOADERS ========== */
+  .skeleton-text {
+    @apply skeleton;
+    height: 14px;
+    width: 100%;
+  }
+
+  .skeleton-title {
+    @apply skeleton;
+    height: 22px;
+    width: 40%;
+  }
+
+  .skeleton-card {
+    @apply skeleton;
+    height: 120px;
+    border-radius: 20px;
+  }
+
+  .skeleton-avatar {
+    @apply skeleton;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+  }
+
+  /* ========== EMPTY STATES ========== */
+  .empty-state {
+    @apply flex flex-col items-center justify-center text-center;
+    padding: 48px 24px;
+    border: 1.5px dashed var(--border);
+    border-radius: 20px;
+    background: rgba(255, 253, 248, 0.6);
+  }
+
+  .empty-state-icon {
+    @apply flex items-center justify-center mb-4;
+    width: 56px;
+    height: 56px;
+    border-radius: 999px;
+    background: var(--primary-soft);
+    color: var(--primary);
+  }
+
+  .empty-state-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 6px;
+  }
+
+  .empty-state-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    max-width: 360px;
+  }
+}

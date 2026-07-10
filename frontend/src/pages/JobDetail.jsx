@@ -307,8 +307,14 @@ export default function JobDetail() {
     };
 
     if (loading) return (
-        <div className="flex justify-center items-center py-20">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <div className="space-y-6" aria-busy="true" aria-label="Loading job details">
+            <div className="skeleton-card" style={{ height: '160px' }} />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="skeleton-card" />
+                <div className="skeleton-card" />
+                <div className="skeleton-card" />
+            </div>
+            <div className="skeleton-card" style={{ height: '220px' }} />
         </div>
     );
 
