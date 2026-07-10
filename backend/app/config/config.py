@@ -42,12 +42,30 @@ def _env_int(name: str, default: int) -> int:
     return int(raw)
 
 
+def _env_str(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip()
+
+
 class Config:
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
-    LLM_INPUT_COST_PER_1M = _env_float("LLM_INPUT_COST_PER_1M", _pricing_default(OPENAI_MODEL, "input"))
-    LLM_OUTPUT_COST_PER_1M = _env_float("LLM_OUTPUT_COST_PER_1M", _pricing_default(OPENAI_MODEL, "output"))
+    # Model routing: reserve the stronger model for grounded evaluation and use a
+    # cheaper/faster model for high-volume, low-risk tasks (signal generation,
+    # summaries). Both default to OPENAI_MODEL so single-model setups behave as
+    # before.
+    OPENAI_EVAL_MODEL = _env_str("OPENAI_EVAL_MODEL", OPENAI_MODEL)
+    OPENAI_FAST_MODEL = _env_str("OPENAI_FAST_MODEL", OPENAI_MODEL)
+    # Optional reasoning effort for reasoning-capable models (e.g. gpt-5*). Left
+    # blank by default so we never send an unsupported field to older models.
+    OPENAI_REASONING_EFFORT = _env_str("OPENAI_REASONING_EFFORT", "")
+    # Optional cap on generated tokens (0 = let the API decide).
+    OPENAI_MAX_OUTPUT_TOKENS = _env_int("OPENAI_MAX_OUTPUT_TOKENS", 0)
+    LLM_INPUT_COST_PER_1M = _env_float("LLM_INPUT_COST_PER_1M", _pricing_default(OPENAI_EVAL_MODEL, "input"))
+    LLM_OUTPUT_COST_PER_1M = _env_float("LLM_OUTPUT_COST_PER_1M", _pricing_default(OPENAI_EVAL_MODEL, "output"))
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:3000")
     ENABLE_LLM_SUMMARIZATION = os.getenv("ENABLE_LLM_SUMMARIZATION", "true").lower() in ("true", "1", "yes")
     LLM_RESPONSE_CACHE_TTL_SECONDS = _env_int("LLM_RESPONSE_CACHE_TTL_SECONDS", 86400)

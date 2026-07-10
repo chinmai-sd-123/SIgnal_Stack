@@ -58,88 +58,94 @@ export default function RecruiterSignup() {
         }
     };
 
+    const inputClass =
+        'block w-full rounded-xl border border-light-200 bg-white px-4 py-2.5 text-text-primary placeholder-text-muted shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 sm:text-sm';
+
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full space-y-8">
-                <div>
-                    <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-                        Create Recruiter Account
-                    </h2>
-                    <p className="mt-2 text-center text-sm text-gray-500">
+        <div className="min-h-screen flex items-center justify-center bg-hero-gradient py-12 px-4 sm:px-6 lg:px-8">
+            <div className="max-w-md w-full animate-slide-up">
+                <div className="text-center mb-6">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold tracking-wide text-white backdrop-blur">
+                        <span className="h-2 w-2 rounded-full bg-accent" />
+                        SignalStack
+                    </div>
+                    <h2 className="mt-5 text-3xl font-bold text-white">Create Recruiter Account</h2>
+                    <p className="mt-2 text-sm text-white/70">
                         Accounts are invite-only. Use the email your admin invited.
                     </p>
                 </div>
 
-                {loading ? (
-                    <div className="rounded-lg border border-gray-200 bg-white p-6 text-center text-sm text-gray-500">
-                        Checking invite...
-                    </div>
-                ) : error && !invite ? (
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-                        {error}
-                        <div className="mt-3">
-                            <Link to="/login" className="font-medium text-red-700 underline">Back to login</Link>
+                <div className="rounded-3xl bg-bg-card shadow-card p-8">
+                    {loading ? (
+                        <div className="text-center text-sm text-text-secondary">Checking invite…</div>
+                    ) : error && !invite ? (
+                        <div className="rounded-xl border border-error/30 bg-error/5 p-4 text-sm text-error">
+                            {error}
+                            <div className="mt-3">
+                                <Link to="/login" className="font-semibold text-error underline">Back to login</Link>
+                            </div>
                         </div>
-                    </div>
-                ) : (
-                    <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-                        <div className="rounded-md shadow-sm -space-y-px">
+                    ) : (
+                        <form className="space-y-5" onSubmit={handleSubmit}>
                             <div>
-                                <label htmlFor="name" className="sr-only">Name</label>
+                                <label htmlFor="name" className="block text-sm font-medium text-text-secondary mb-1">Name</label>
                                 <input
                                     id="name"
                                     name="name"
                                     type="text"
-                                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
-                                    placeholder="Name"
+                                    className={inputClass}
+                                    placeholder="Your name"
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
                                 />
                             </div>
                             <div>
-                                <label htmlFor="email-address" className="sr-only">Email address</label>
+                                <label htmlFor="email-address" className="block text-sm font-medium text-text-secondary mb-1">Email address</label>
                                 <input
                                     id="email-address"
                                     name="email"
                                     type="email"
                                     required
-                                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 bg-gray-50 focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
+                                    className={`${inputClass} bg-light-50`}
                                     placeholder="Email address"
                                     value={email}
                                     readOnly
                                 />
                             </div>
                             <div>
-                                <label htmlFor="password" className="sr-only">Password</label>
+                                <label htmlFor="password" className="block text-sm font-medium text-text-secondary mb-1">Password</label>
                                 <input
                                     id="password"
                                     name="password"
                                     type="password"
                                     required
                                     minLength={8}
-                                    className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-primary focus:border-primary focus:z-10 sm:text-sm"
-                                    placeholder="Password"
+                                    className={inputClass}
+                                    placeholder="At least 8 characters"
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
                                 />
                             </div>
-                        </div>
 
-                        {error && <div className="text-red-500 text-sm">{error}</div>}
+                            {error && (
+                                <div className="rounded-xl border border-error/30 bg-error/5 px-3 py-2 text-sm text-error">{error}</div>
+                            )}
 
-                        <button
-                            type="submit"
-                            disabled={submitting}
-                            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-primary hover:bg-primary-hover disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-                        >
-                            {submitting ? 'Creating account...' : 'Create account'}
-                        </button>
+                            <button
+                                type="submit"
+                                disabled={submitting}
+                                className="w-full rounded-xl bg-primary py-2.5 px-4 text-sm font-semibold text-white shadow-glow-sm transition-colors hover:bg-primary-hover disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
+                            >
+                                {submitting ? 'Creating account…' : 'Create account'}
+                            </button>
 
-                        <p className="text-center text-sm text-gray-500">
-                            Already have an account? <Link to="/login" className="font-medium text-primary hover:underline">Sign in</Link>
-                        </p>
-                    </form>
-                )}
+                            <p className="text-center text-sm text-text-secondary">
+                                Already have an account?{' '}
+                                <Link to="/login" className="font-semibold text-primary hover:underline">Sign in</Link>
+                            </p>
+                        </form>
+                    )}
+                </div>
             </div>
         </div>
     );

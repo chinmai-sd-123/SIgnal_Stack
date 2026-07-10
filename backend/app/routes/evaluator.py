@@ -11,6 +11,7 @@ from app.monitoring import track_evaluation_complete, track_evaluation_start
 from app.services import crud
 from app.services.auth import ensure_job_access, get_current_recruiter
 from app.pipeline.evaluator import Evaluator
+from app.pipeline.scoring_engine import load_signal_weights
 from app.pipeline.signal_extractor import SignalExtractor
 import app.models as models
 
@@ -37,9 +38,10 @@ def evaluate(
             signals = extractor.extract_signals(proof)
             signals_map[proof.candidate_id] = signals
 
-        # 2. Evaluate using Allocation Engine
+        # 2. Evaluate using Allocation Engine (with learned signal weights)
         evaluator = Evaluator()
-        evaluation = evaluator.evaluate(request.outcome, request.proofs, signals_map)
+        weights = load_signal_weights(db)
+        evaluation = evaluator.evaluate(request.outcome, request.proofs, signals_map, weights=weights)
 
         # 3. Store Evaluation (Persist the result)
         crud.create_evaluation(db, evaluation)

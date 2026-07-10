@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { FileCode, FileText, ChevronDown, ChevronUp, ExternalLink, GitBranch, Shield, CheckCircle, Terminal, Link, Sparkles } from 'lucide-react';
 
 const SHORTENED_MARKER = '[Snippet shortened. Open the GitHub source link for the full file.]';
@@ -116,7 +116,7 @@ const EvidenceItem = ({ evidence }) => {
     const isShortened = snippet.includes(SHORTENED_MARKER);
     const cleanedSnippet = snippet.replace(SHORTENED_MARKER, '').trim();
 
-    const lines = useMemo(() => cleanedSnippet.split('\n'), [cleanedSnippet]);
+    const lines = cleanedSnippet.split('\n');
     const previewLineCount = kind === 'code' ? 5 : 6;
     const isLong = kind === 'repository' || lines.length > previewLineCount || cleanedSnippet.length > 420 || isShortened;
     const displayContent = isExpanded ? cleanedSnippet : lines.slice(0, previewLineCount).join('\n');

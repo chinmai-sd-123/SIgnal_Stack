@@ -15,7 +15,7 @@ from app.models.job_candidate import JobCandidate
 from app.models.outcome import Outcome
 from app.models.proof import Proof
 from app.pipeline.evaluator import Evaluator
-from app.pipeline.scoring_engine import score_candidate
+from app.pipeline.scoring_engine import score_candidate, load_signal_weights
 from app.pipeline.signal_extractor import SignalExtractor
 from app.monitoring import track_evaluation_complete, track_evaluation_start
 from app.services import crud
@@ -634,7 +634,7 @@ def recover_stale_job_evaluations(db, job_id: str) -> int:
     return _recover_interrupted_evaluations(db, job_id)
 
 
-def _screen_submission(db, submission: InviteSubmission, extractor: SignalExtractor) -> Dict[str, Any]:
+def _screen_submission(db, submission: InviteSubmission, extractor: SignalExtractor, weights: Dict[str, float] = None) -> Dict[str, Any]:
     candidate_id = candidate_id_for_submission(submission)
     candidate = ensure_job_candidate(db, submission.job_id, candidate_id, status="evaluating")
     submission.status = "evaluating"
@@ -649,7 +649,7 @@ def _screen_submission(db, submission: InviteSubmission, extractor: SignalExtrac
     proof_schema = _proof_to_schema(proof)
     signals = extractor.extract_signals(proof_schema)
     public_signals = _safe_public_signals(signals)
-    scoring = score_candidate(public_signals)
+    scoring = score_candidate(public_signals, weights=weights)
 
     verification = _verification_status(public_signals, scoring.risk_flags)
     score = round(scoring.capped_score * 100, 2)
@@ -703,6 +703,7 @@ def _deep_evaluate_top_candidates(
     job_id: str,
     candidate_ids: List[str],
     signals_by_candidate: Dict[str, Dict[str, Any]],
+    weights: Dict[str, float] = None,
 ) -> int:
     if not candidate_ids:
         return 0
@@ -750,9 +751,9 @@ def _deep_evaluate_top_candidates(
         db.rollback()
 
         if hasattr(evaluator, "evaluate_batched"):
-            delta_evaluation = evaluator.evaluate_batched(outcome_schema, proof_schemas, signals_map)
+            delta_evaluation = evaluator.evaluate_batched(outcome_schema, proof_schemas, signals_map, weights=weights)
         else:
-            delta_evaluation = evaluator.evaluate(outcome_schema, proof_schemas, signals_map)
+            delta_evaluation = evaluator.evaluate(outcome_schema, proof_schemas, signals_map, weights=weights)
 
         evaluation = (
             _merge_evaluation_response(existing_response, delta_evaluation)
@@ -821,6 +822,10 @@ def evaluate_job_applications_sync(
         sync_job_invite_proofs(db, job_id)
         _recover_interrupted_evaluations(db, job_id)
 
+        # Load learned signal weights once per run so feedback-driven learning
+        # actually influences screening and deep evaluation scores.
+        weights = load_signal_weights(db)
+
         extractor = SignalExtractor()
         screened: List[Dict[str, Any]] = []
         signals_by_candidate: Dict[str, Dict[str, Any]] = {}
@@ -839,7 +844,7 @@ def evaluate_job_applications_sync(
             for submission in submissions:
                 candidate_id = candidate_id_for_submission(submission)
                 try:
-                    result = _screen_submission(db, submission, extractor)
+                    result = _screen_submission(db, submission, extractor, weights)
                     screened.append(result)
                     if result.get("signals"):
                         signals_by_candidate[candidate_id] = result["signals"]
@@ -867,6 +872,7 @@ def evaluate_job_applications_sync(
                     job_id,
                     top_candidate_ids,
                     signals_by_candidate,
+                    weights,
                 )
 
             if remaining_candidate_limit == 0:

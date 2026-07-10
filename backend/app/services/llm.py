@@ -1,11 +1,12 @@
 import json
 import logging
+import random
 import re
 import time
 from typing import Any, Dict, List
 
 import app.schemas as schemas
-from app.config.config import config
+from app.config.config import config, _pricing_default
 from app.monitoring import track_llm_cache_hit, track_llm_usage
 from app.services.cache import cache
 from app.services.leetcode import LeetCodeService
@@ -13,11 +14,22 @@ from app.services.leetcode import LeetCodeService
 
 logger = logging.getLogger(__name__)
 
+# Substrings that indicate a transient failure worth retrying.
+_RETRYABLE_MARKERS = (
+    "429", "rate limit", "temporarily unavailable", "overloaded",
+    "timeout", "timed out", "connection", "connection reset",
+    "500", "502", "503", "504", "server error", "bad gateway",
+    "service unavailable", "gateway timeout",
+)
+
 
 class OpenAILLMService:
     def __init__(self):
         self.api_key = config.OPENAI_API_KEY
-        self.model = config.OPENAI_MODEL or "gpt-5.4-mini"
+        # Primary (evaluation) model — the stronger model used for grounded
+        # assessment. Fast model handles cheap, high-volume generation.
+        self.model = config.OPENAI_EVAL_MODEL or config.OPENAI_MODEL or "gpt-5-mini"
+        self.fast_model = config.OPENAI_FAST_MODEL or self.model
         self.leetcode_service = LeetCodeService()
         self.client = None
 
@@ -73,34 +85,56 @@ class OpenAILLMService:
             "total_tokens": total_tokens or input_tokens + output_tokens,
         }
 
-    def _estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        input_cost = (input_tokens / 1_000_000) * config.LLM_INPUT_COST_PER_1M
-        output_cost = (output_tokens / 1_000_000) * config.LLM_OUTPUT_COST_PER_1M
+    def _estimate_cost(self, input_tokens: int, output_tokens: int, model: str = None) -> float:
+        model = model or self.model
+        # Honour explicit price overrides for the primary model; otherwise infer
+        # per-model pricing so routed cheaper-model calls are costed correctly.
+        if model == self.model and config.LLM_INPUT_COST_PER_1M:
+            input_price = config.LLM_INPUT_COST_PER_1M
+            output_price = config.LLM_OUTPUT_COST_PER_1M
+        else:
+            input_price = _pricing_default(model, "input")
+            output_price = _pricing_default(model, "output")
+        input_cost = (input_tokens / 1_000_000) * input_price
+        output_cost = (output_tokens / 1_000_000) * output_price
         return round(input_cost + output_cost, 8)
+
+    def _is_retryable(self, message: str) -> bool:
+        message = (message or "").lower()
+        return any(marker in message for marker in _RETRYABLE_MARKERS)
 
     def _call_with_retry(
         self,
         prompt: str,
         schema: Dict[str, Any] = None,
         tracking_context: Dict[str, Any] = None,
+        model: str = None,
     ) -> str:
         if not self.client:
             raise RuntimeError("OpenAI client is not configured.")
 
+        model = model or self.model
         retries = 3
         delay = 2
         payload = {
-            "model": self.model,
+            "model": model,
             "input": prompt,
         }
+
+        # Optional modern tuning knobs — only sent when explicitly configured so
+        # older/non-reasoning models keep working unchanged.
+        if config.OPENAI_REASONING_EFFORT:
+            payload["reasoning"] = {"effort": config.OPENAI_REASONING_EFFORT}
+        if config.OPENAI_MAX_OUTPUT_TOKENS:
+            payload["max_output_tokens"] = config.OPENAI_MAX_OUTPUT_TOKENS
 
         cache_key = None
         if prompt:
             schema_name = schema.get("name", "none") if schema else "none"
-            cache_key = f"{self.model}|{schema_name}|{prompt}"
+            cache_key = f"{model}|{schema_name}|{prompt}"
             cached = cache.get_llm_response_by_prompt(cache_key)
             if isinstance(cached, str) and cached.strip():
-                track_llm_cache_hit(model=self.model, context=tracking_context)
+                track_llm_cache_hit(model=model, context=tracking_context)
                 return cached
 
         if schema:
@@ -123,12 +157,13 @@ class OpenAILLMService:
                 track_llm_usage(
                     latency_seconds=latency,
                     success=True,
-                    model=self.model,
+                    model=model,
                     input_tokens=usage["input_tokens"],
                     output_tokens=usage["output_tokens"],
                     estimated_cost=self._estimate_cost(
                         usage["input_tokens"],
                         usage["output_tokens"],
+                        model,
                     ),
                     cached=False,
                     context=tracking_context,
@@ -138,26 +173,19 @@ class OpenAILLMService:
                 return text
             except Exception as e:
                 latency = time.time() - start
-                message = str(e).lower()
-                if ("429" in message or "rate limit" in message or "temporarily unavailable" in message) and i < retries - 1:
-                    track_llm_usage(
-                        latency_seconds=latency,
-                        success=False,
-                        model=self.model,
-                        cached=False,
-                        context=tracking_context,
-                    )
-                    logger.warning("OpenAI rate limit. Retrying in %ss...", delay)
-                    time.sleep(delay)
-                    delay *= 2
-                    continue
                 track_llm_usage(
                     latency_seconds=latency,
                     success=False,
-                    model=self.model,
+                    model=model,
                     cached=False,
                     context=tracking_context,
                 )
+                if self._is_retryable(str(e)) and i < retries - 1:
+                    sleep_for = delay + random.uniform(0, 0.75)  # jittered backoff
+                    logger.warning("OpenAI transient error (%s). Retrying in %.1fs...", e, sleep_for)
+                    time.sleep(sleep_for)
+                    delay *= 2
+                    continue
                 raise e
 
     def _parse_json(self, text: str) -> Any:
@@ -783,6 +811,7 @@ Return JSON only:
                     "outcome_id": proof.job_id,
                     "operation": "proof_summary",
                 },
+                model=self.fast_model,
             ))
         except Exception as e:
             logger.warning("[LLM] Summary error: %s", e)
@@ -901,7 +930,7 @@ Return JSON only, no explanation.
                     },
                 },
             }
-            data = self._parse_json(self._call_with_retry(prompt, schema))
+            data = self._parse_json(self._call_with_retry(prompt, schema, model=self.fast_model))
             tasks = clean_tasks(data.get("tasks", []))
             return tasks if len(tasks) >= 3 else get_fallback_tasks(description)
         except Exception as e:

@@ -110,8 +110,8 @@ def _confidence_rating(capability: float, evidence_confidence: float, verificati
     return "Low"
 
 
-def _candidate_quality(signals: Dict, capability_score: float) -> Dict:
-    scoring = score_candidate(signals) if signals else None
+def _candidate_quality(signals: Dict, capability_score: float, weights: Dict = None) -> Dict:
+    scoring = score_candidate(signals, weights=weights) if signals else None
     risk_flags = scoring.risk_flags if scoring else []
     evidence_confidence = scoring.confidence if scoring else 0.0
     production_readiness = _production_readiness(signals or {})
@@ -147,10 +147,14 @@ class Evaluator:
         self.allocator = Allocator()
         self.extractor = SignalExtractor()
 
-    def evaluate(self, outcome: schemas.OutcomeCreate, proofs: List[schemas.ProofCreate], signals_map: Dict[str, Dict]) -> schemas.EvaluationResponse:
+    def evaluate(self, outcome: schemas.OutcomeCreate, proofs: List[schemas.ProofCreate], signals_map: Dict[str, Dict], weights: Dict[str, float] = None) -> schemas.EvaluationResponse:
         """
         Evaluate all candidates (proofs) against all tasks in the outcome.
         For each task, find the best matching candidate and track all scores.
+
+        ``weights`` carries the learned/DB signal weights so feedback-driven
+        learning actually influences the deterministic score blend. When not
+        provided, scoring falls back to the built-in defaults.
         """
         allocations = []
         global_signals_used = set()
@@ -366,8 +370,8 @@ class Evaluator:
                 continue
             
             avg_score = stats['total_score'] / stats['task_count']
-            
-            quality = _candidate_quality(signals_map.get(cand_id, {}), avg_score)
+
+            quality = _candidate_quality(signals_map.get(cand_id, {}), avg_score, weights)
             fit_score = _candidate_fit_score(avg_score, quality)
             
             candidate_summaries.append(schemas.CandidateSummary(
@@ -393,7 +397,7 @@ class Evaluator:
         if top_candidate_id and top_candidate_id in signals_map:
             top_signals = signals_map[top_candidate_id]
             top_capability = candidate_summaries[0].capability_score or raw_final
-            top_quality = _candidate_quality(top_signals, top_capability)
+            top_quality = _candidate_quality(top_signals, top_capability, weights)
             scoring = top_quality["scoring"]
             all_risk_flags = scoring.risk_flags
             # Let direct task evidence lead for early applications. Deterministic
@@ -425,7 +429,7 @@ class Evaluator:
             candidate_summaries=candidate_summaries
         )
 
-    def evaluate_batched(self, outcome: schemas.OutcomeCreate, proofs: List[schemas.ProofCreate], signals_map: Dict[str, Dict]) -> schemas.EvaluationResponse:
+    def evaluate_batched(self, outcome: schemas.OutcomeCreate, proofs: List[schemas.ProofCreate], signals_map: Dict[str, Dict], weights: Dict[str, float] = None) -> schemas.EvaluationResponse:
         """
         High-volume evaluator used by the background job queue.
 
@@ -632,6 +636,7 @@ class Evaluator:
             candidate_stats,
             signals_map,
             global_signals_used,
+            weights,
         )
 
     def _task_key(self, task, index: int) -> str:
@@ -644,6 +649,7 @@ class Evaluator:
         candidate_stats: Dict[str, Dict],
         signals_map: Dict[str, Dict],
         global_signals_used,
+        weights: Dict[str, float] = None,
     ) -> schemas.EvaluationResponse:
         total_fit = 0.0
         total_possible_weight = 0.0
@@ -663,7 +669,7 @@ class Evaluator:
                 continue
 
             avg_score = stats["total_score"] / stats["task_count"]
-            quality = _candidate_quality(signals_map.get(cand_id, {}), avg_score)
+            quality = _candidate_quality(signals_map.get(cand_id, {}), avg_score, weights)
             fit_score = _candidate_fit_score(avg_score, quality)
             candidate_summaries.append(schemas.CandidateSummary(
                 candidate_id=cand_id,
@@ -684,7 +690,7 @@ class Evaluator:
         if top_candidate_id and top_candidate_id in signals_map:
             top_signals = signals_map[top_candidate_id]
             top_capability = candidate_summaries[0].capability_score or raw_final
-            top_quality = _candidate_quality(top_signals, top_capability)
+            top_quality = _candidate_quality(top_signals, top_capability, weights)
             scoring = top_quality["scoring"]
             all_risk_flags = scoring.risk_flags
             final_score = candidate_summaries[0].overall_score
