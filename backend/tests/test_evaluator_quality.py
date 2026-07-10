@@ -178,6 +178,15 @@ def test_batched_evaluator_uses_one_llm_call_per_candidate_outcome(monkeypatch):
                 )
             ]
 
+        def extract_best_evidence(self, repo_urls, task_title, context="", artifact_link=None, keywords=None):
+            chosen = repo_urls[0] if repo_urls else ""
+            return chosen, self.extract_evidence(
+                repo_url=chosen,
+                task_title=task_title,
+                context=context,
+                artifact_link=artifact_link,
+            )
+
         def extract_authorship_signals(self, *args, **kwargs):
             return Evidence(
                 type="authorship_context",
@@ -242,3 +251,45 @@ def test_batched_evaluator_uses_one_llm_call_per_candidate_outcome(monkeypatch):
     assert result.fit_score == result.candidate_summaries[0].overall_score
     assert result.candidate_summaries[0].overall_score != result.candidate_summaries[0].capability_score
     assert result.candidate_summaries[0].tasks_won == 2
+
+
+@pytest.mark.unit
+def test_multi_repo_routes_each_task_to_best_repo():
+    """Each signal should be judged against the submitted repo that best proves it."""
+    from app.pipeline.evaluator import _repo_candidates
+    from app.pipeline.signal_extractor import SignalExtractor
+
+    payload = {
+        "repo_url": "https://github.com/acme/rag-project",
+        "repo_urls": [
+            "https://github.com/acme/rag-project",
+            "https://github.com/acme/api-project",
+        ],
+    }
+    assert _repo_candidates(payload) == payload["repo_urls"]
+
+    # Legacy single-repo payloads still work
+    assert _repo_candidates({"repo_url": "https://github.com/acme/solo"}) == [
+        "https://github.com/acme/solo"
+    ]
+    assert _repo_candidates({"repo_url": "https://gitlab.com/x/y"}) == []
+
+    extractor = SignalExtractor()
+    per_repo_evidence = {
+        "https://github.com/acme/rag-project": [
+            Evidence(type="code_snippet", ref="FILE:rag/ingest.py",
+                     snippet="[TASK_SPECIFIC | priority=130] rag/ingest.py\nchunk_documents()"),
+        ],
+        "https://github.com/acme/api-project": [
+            Evidence(type="code_snippet", ref="FILE:README.md",
+                     snippet="[README | priority=85] README.md\nA REST API project"),
+        ],
+    }
+    extractor.extract_evidence = lambda repo_url, **kwargs: per_repo_evidence.get(repo_url, [])
+
+    chosen, evidence = extractor.extract_best_evidence(
+        list(per_repo_evidence.keys()),
+        task_title="Document ingestion, chunking, or indexing pipeline",
+    )
+    assert chosen == "https://github.com/acme/rag-project"
+    assert evidence[0].ref == "FILE:rag/ingest.py"

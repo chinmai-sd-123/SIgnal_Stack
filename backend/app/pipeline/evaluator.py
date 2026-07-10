@@ -12,6 +12,21 @@ from app.pipeline.scoring_engine import score_candidate
 
 logger = logging.getLogger(__name__)
 
+
+def _repo_candidates(payload: Dict) -> List[str]:
+    """GitHub repos submitted by the candidate (multi-repo aware, max 3)."""
+    repos = [
+        str(url).strip()
+        for url in (payload.get("repo_urls") or [])
+        if url and "github.com" in str(url)
+    ][:3]
+    if not repos:
+        primary = payload.get("repo_url", "")
+        if primary and "github.com" in primary:
+            repos = [primary]
+    return repos
+
+
 def _avg_dimensions(summaries: List) -> Dict:
     """Average dimension scores across all evaluated candidates."""
     dim_totals = {}
@@ -179,7 +194,7 @@ class Evaluator:
             # Evaluate each candidate (proof) for this task
             for proof in proofs:
                 cand_id = proof.candidate_id
-                
+
                 # Initialize candidate stats if not exists
                 if cand_id not in candidate_stats:
                     candidate_stats[cand_id] = {
@@ -188,50 +203,62 @@ class Evaluator:
                         'wins': 0,
                         'dimensions': None
                     }
-                
+
                 # 1. Signal Extraction (Gather Evidence)
                 repo_url = proof.payload.get("repo_url", "")
                 artifact_link = proof.payload.get("artifact_link")
                 context_desc = proof.payload.get("context", "")
-                
+                repo_candidates = _repo_candidates(proof.payload)
+
                 # Skip candidates without evidence
-                if not repo_url and not artifact_link:
+                if not repo_candidates and not repo_url and not artifact_link:
                     logger.debug("Skipping %s - No evidence provided.", cand_id)
                     continue
-                
-                # Safe Clean URL for display
-                display_url = repo_url or artifact_link or ""
+
+                logger.debug("Extracting evidence for %s. Candidate: %s", task.name, cand_id)
+
+                # Extract evidence from the repo that best proves this task
+                # (candidates can submit up to 3 relevant projects)
+                chosen_repo, task_evidence = self.extractor.extract_best_evidence(
+                    repo_candidates,
+                    task_title=task_context,
+                    context=context_desc,
+                    artifact_link=artifact_link,
+                )
+
+                # Safe Clean URL for display (per-task repo)
+                display_url = chosen_repo or repo_url or artifact_link or ""
                 clean_repo_url = display_url.rstrip('/')
                 if clean_repo_url.endswith('.git'):
                     clean_repo_url = clean_repo_url[:-4]
 
-                logger.debug("Extracting evidence for %s. Candidate: %s", task.name, cand_id)
-
-                # Extract evidence specific to this task
-                task_evidence = self.extractor.extract_evidence(
-                    repo_url=repo_url, 
-                    task_title=task_context,
-                    context=context_desc,
-                    artifact_link=artifact_link
-                )
                 logger.debug("Evidence found: %s", len(task_evidence))
                 task_short = task.name[:30].replace(' ', '_') if task.name else 'general'
                 # GitHub-specific checks
-                if repo_url and "github.com" in repo_url:
-                    # Forensic Authorship Check (Task-Specific)
+                if chosen_repo:
+                    # Forensic Authorship Check (Task-Specific). The cached
+                    # author map belongs to the screened best repo, so only
+                    # reuse it when this task chose the same repo.
+                    cand_signals_all = signals_map.get(cand_id, {})
+                    author_map_repo = cand_signals_all.get("_best_repo_url") or repo_url
                     authorship_evidence = self.extractor.extract_authorship_signals(
-                        repo_url,
+                        chosen_repo,
                         cand_id,
                         task_context,
                         candidate_info=proof.payload,                              # ← identity fields
-                        cached_author_map=signals_map.get(cand_id, {}).get("_author_map"),  # ← skip re-fetch
+                        cached_author_map=(
+                            cand_signals_all.get("_author_map")
+                            if chosen_repo == author_map_repo else None
+                        ),
                     )
                     task_evidence.append(authorship_evidence)
                     
                     # Inject Phase 1 Signals (Heuristic Project Health)
                     cand_signals = signals_map.get(cand_id, {})
                     if cand_signals:
-                        sig_snippet = f"Task: {task.name}\n\nProject Health Signals (Phase 1 Analysis):\n"
+                        scanned_repo = cand_signals.get("_best_repo_url") or repo_url or chosen_repo
+                        scan_label = f" of {scanned_repo}" if scanned_repo and scanned_repo != chosen_repo else ""
+                        sig_snippet = f"Task: {task.name}\n\nProject Health Signals (Phase 1 Analysis{scan_label}):\n"
                         sig_keys = [
                             "tests_present", "ci_cd_present", "deployment_ready",
                             "ml_model_present", "commit_count", "unique_authors",
@@ -286,7 +313,7 @@ class Evaluator:
                         type="code_snippet",
                         ref=f"AI_FINDING:{task_short}",
                         snippet=f"Key Evidence (AI Analysis):\n{relevant_evidence_text}",
-                        source_url=clean_repo_url if repo_url else None
+                        source_url=clean_repo_url if (chosen_repo or repo_url) else None
                     ))
                 
                 # 3. Deterministic Scoring
@@ -460,8 +487,9 @@ class Evaluator:
             repo_url = proof.payload.get("repo_url", "")
             artifact_link = proof.payload.get("artifact_link")
             context_desc = proof.payload.get("context", "")
+            repo_candidates = _repo_candidates(proof.payload)
 
-            if not repo_url and not artifact_link:
+            if not repo_candidates and not repo_url and not artifact_link:
                 logger.debug("Skipping %s - No evidence provided.", cand_id)
                 continue
 
@@ -473,11 +501,6 @@ class Evaluator:
                     "dimensions": None,
                 }
 
-            display_url = repo_url or artifact_link or ""
-            clean_repo_url = display_url.rstrip("/")
-            if clean_repo_url.endswith(".git"):
-                clean_repo_url = clean_repo_url[:-4]
-
             task_payloads = []
             task_evidence_by_key: Dict[str, Dict] = {}
 
@@ -486,27 +509,41 @@ class Evaluator:
                 task_context = self._build_task_context(outcome, task)
                 logger.debug("Extracting batched evidence for %s. Candidate: %s", task.name, cand_id)
 
-                task_evidence = self.extractor.extract_evidence(
-                    repo_url=repo_url,
+                # Route each signal to the candidate repo that best proves it
+                chosen_repo, task_evidence = self.extractor.extract_best_evidence(
+                    repo_candidates,
                     task_title=task_context,
                     context=context_desc,
                     artifact_link=artifact_link,
                 )
+
+                display_url = chosen_repo or repo_url or artifact_link or ""
+                clean_repo_url = display_url.rstrip("/")
+                if clean_repo_url.endswith(".git"):
+                    clean_repo_url = clean_repo_url[:-4]
+
                 task_short = task.name[:30].replace(" ", "_") if task.name else "general"
 
-                if repo_url and "github.com" in repo_url:
+                if chosen_repo:
+                    cand_signals_all = signals_map.get(cand_id, {})
+                    author_map_repo = cand_signals_all.get("_best_repo_url") or repo_url
                     authorship_evidence = self.extractor.extract_authorship_signals(
-                        repo_url,
+                        chosen_repo,
                         cand_id,
                         task_context,
                         candidate_info=proof.payload,
-                        cached_author_map=signals_map.get(cand_id, {}).get("_author_map"),
+                        cached_author_map=(
+                            cand_signals_all.get("_author_map")
+                            if chosen_repo == author_map_repo else None
+                        ),
                     )
                     task_evidence.append(authorship_evidence)
 
                     cand_signals = signals_map.get(cand_id, {})
                     if cand_signals:
-                        sig_snippet = f"Task: {task.name}\n\nProject Health Signals (Phase 1 Analysis):\n"
+                        scanned_repo = cand_signals.get("_best_repo_url") or repo_url or chosen_repo
+                        scan_label = f" of {scanned_repo}" if scanned_repo and scanned_repo != chosen_repo else ""
+                        sig_snippet = f"Task: {task.name}\n\nProject Health Signals (Phase 1 Analysis{scan_label}):\n"
                         sig_keys = [
                             "tests_present", "ci_cd_present", "deployment_ready",
                             "ml_model_present", "commit_count", "unique_authors",
@@ -574,7 +611,7 @@ class Evaluator:
                         type="code_snippet",
                         ref=f"AI_FINDING:{task_short}",
                         snippet=f"Key Evidence (AI Analysis):\n{relevant_evidence_text}",
-                        source_url=clean_repo_url if repo_url else None,
+                        source_url=clean_repo_url or None,
                     ))
 
                 score = self.matcher.calculate_task_score(signal_strength)

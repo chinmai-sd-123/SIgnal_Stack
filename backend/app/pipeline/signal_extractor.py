@@ -29,25 +29,69 @@ class SignalExtractor:
     # =========================================================================
 
     def extract_signals(self, proof: schemas.ProofCreate) -> Dict[str, Any]:
-        """Extract raw signals from the proof of work."""
+        """
+        Extract raw signals from the proof of work.
+
+        Supports multiple submitted repositories (repo_urls, up to 3): each repo
+        is scanned separately and the strongest repo's signal set is used for
+        screening. The chosen repo is exposed as _best_repo_url so deep
+        evaluation can align authorship context with it.
+        """
         repo_url = proof.payload.get("repo_url", "")
         artifact_link = proof.payload.get("artifact_link")
 
-        target = artifact_link or repo_url
+        repo_candidates = [
+            str(url).strip()
+            for url in (proof.payload.get("repo_urls") or [])
+            if url and "github.com" in str(url)
+        ][:3]
+        if not repo_candidates and repo_url and "github.com" in repo_url:
+            repo_candidates = [repo_url]
+
+        target = artifact_link or repo_url or (repo_candidates[0] if repo_candidates else "")
         if not target:
             return {"valid_repo": 0.0, "has_evidence": 0.0}
 
-        if "github.com" not in target:
-            return {
-                "valid_repo": 0.0,
-                "has_evidence": 1.0,
-                "artifact_present": 1.0,
-                "context_length": len(proof.payload.get("context", "")),
-            }
-
-        if not repo_url or "github.com" not in repo_url:
+        if not repo_candidates:
+            if "github.com" not in target:
+                return {
+                    "valid_repo": 0.0,
+                    "has_evidence": 1.0,
+                    "artifact_present": 1.0,
+                    "context_length": len(proof.payload.get("context", "")),
+                }
             return {"valid_repo": 0.0}
 
+        best_signals: Dict[str, Any] = {"valid_repo": 0.0}
+        best_score = -1.0
+        for candidate_repo in repo_candidates:
+            repo_signals = self._extract_repo_signals(candidate_repo, proof)
+            repo_score = self._quick_signal_score(repo_signals)
+            if repo_score > best_score:
+                best_score = repo_score
+                best_signals = repo_signals
+                best_signals["_best_repo_url"] = candidate_repo
+
+        best_signals["repos_analyzed"] = len(repo_candidates)
+        return best_signals
+
+    def _quick_signal_score(self, signals: Dict[str, Any]) -> float:
+        """Deterministic weighted score used only to rank a candidate's repos."""
+        from app.pipeline.scoring_engine import DEFAULT_WEIGHTS
+
+        score = 0.0
+        for name, weight in DEFAULT_WEIGHTS.items():
+            value = signals.get(name, 0.0)
+            if isinstance(value, dict):
+                value = value.get("value", 0.0)
+            try:
+                score += min(max(float(value or 0.0), 0.0), 1.0) * weight
+            except (TypeError, ValueError):
+                continue
+        return score
+
+    def _extract_repo_signals(self, repo_url: str, proof: schemas.ProofCreate) -> Dict[str, Any]:
+        """Extract the full deterministic signal set for one repository."""
         signals: Dict[str, Any] = {"valid_repo": 1.0}
         files, _ = self.github.get_recursive_tree(repo_url)
 
@@ -456,6 +500,93 @@ class SignalExtractor:
         ))
 
         return evidence
+
+    # =========================================================================
+    # PUBLIC: extract_best_evidence (multi-repo routing)
+    # =========================================================================
+
+    def extract_best_evidence(
+        self,
+        repo_urls: List[str],
+        task_title: str,
+        context: str = "",
+        artifact_link: str = None,
+        keywords: Optional[List[str]] = None,
+    ) -> tuple:
+        """
+        Route each signal/task to the candidate repository with the strongest
+        evidence for it.
+
+        Candidates can submit up to 3 projects relevant to the JD. A RAG signal
+        should be judged against their RAG project and an API signal against
+        their API project, instead of forcing one repo to prove everything.
+
+        Returns (chosen_repo_url, evidence). chosen_repo_url is "" when no
+        GitHub repo produced evidence (artifact-only submissions).
+        """
+        github_repos = [
+            str(url).strip() for url in (repo_urls or [])
+            if url and "github.com" in str(url)
+        ][:3]
+
+        if not github_repos:
+            return "", self.extract_evidence(
+                repo_url="",
+                task_title=task_title,
+                context=context,
+                artifact_link=artifact_link,
+                keywords=keywords,
+            )
+
+        if len(github_repos) == 1:
+            return github_repos[0], self.extract_evidence(
+                repo_url=github_repos[0],
+                task_title=task_title,
+                context=context,
+                artifact_link=artifact_link,
+                keywords=keywords,
+            )
+
+        best_repo = github_repos[0]
+        best_evidence: List[schemas.Evidence] = []
+        best_quality = -1.0
+
+        for repo in github_repos:
+            evidence = self.extract_evidence(
+                repo_url=repo,
+                task_title=task_title,
+                context=context,
+                artifact_link=artifact_link,
+                keywords=keywords,
+            )
+            quality = self._evidence_quality(evidence)
+            if quality > best_quality:
+                best_quality = quality
+                best_repo = repo
+                best_evidence = evidence
+
+        return best_repo, best_evidence
+
+    @staticmethod
+    def _evidence_quality(evidence: List[schemas.Evidence]) -> float:
+        """
+        Score an evidence set for task relevance.
+
+        Code snippets carry a priority marker written by the evidence selector
+        ("[CATEGORY | priority=N] path"). Task-specific implementation files
+        rank far above generic manifests/README, so summing those priorities is
+        a reliable proxy for how well a repo proves this specific signal.
+        """
+        score = 0.0
+        for item in evidence:
+            if item.type != "code_snippet":
+                continue
+            match = re.search(r"priority=(\d+)", item.snippet or "")
+            priority = int(match.group(1)) if match else 45
+            score += priority
+            if "TASK_SPECIFIC" in (item.snippet or "")[:80].upper():
+                score += 40
+        return score
 
     # =========================================================================
     # PUBLIC: extract_authorship_signals

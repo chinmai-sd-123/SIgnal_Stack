@@ -15,11 +15,14 @@ export default function CandidateApply() {
     const [submitting, setSubmitting] = useState(false);
     const [submitted, setSubmitted] = useState(false);
 
+    const MAX_REPOS = 3;
     const [formData, setFormData] = useState({
         candidate_name: '', candidate_email: '', github_username: '',
         repo_url: '', linkedin_url: '', resume_url: '',
         leetcode_username: '', context: '',
     });
+    const [selectedRepos, setSelectedRepos] = useState([]);
+    const [manualRepoUrl, setManualRepoUrl] = useState('');
 
     const [repos, setRepos] = useState([]);
     const [fetchingRepos, setFetchingRepos] = useState(false);
@@ -62,16 +65,50 @@ export default function CandidateApply() {
         finally { setFetchingRepos(false); }
     };
 
-    const selectRepo = (repo) => {
-        setFormData({ ...formData, repo_url: repo.url });
-        setShowRepoList(false);
+    const normalizeRepoUrl = (url) => {
+        let value = String(url || '').trim().replace(/\/+$/, '');
+        if (value.endsWith('.git')) value = value.slice(0, -4);
+        return value;
     };
+
+    const addRepo = (url) => {
+        const value = normalizeRepoUrl(url);
+        if (!value || !value.includes('github.com')) return false;
+        setSelectedRepos((current) => {
+            if (current.some((item) => item.toLowerCase() === value.toLowerCase())) return current;
+            if (current.length >= MAX_REPOS) return current;
+            return [...current, value];
+        });
+        return true;
+    };
+
+    const removeRepo = (url) => {
+        setSelectedRepos((current) => current.filter((item) => item !== url));
+    };
+
+    const toggleRepo = (repo) => {
+        const value = normalizeRepoUrl(repo.url);
+        if (selectedRepos.some((item) => item.toLowerCase() === value.toLowerCase())) {
+            removeRepo(value);
+        } else {
+            addRepo(value);
+        }
+    };
+
+    const isRepoSelected = (repo) =>
+        selectedRepos.some((item) => item.toLowerCase() === normalizeRepoUrl(repo.url).toLowerCase());
+
+    const handleAddManualRepo = () => {
+        if (addRepo(manualRepoUrl)) setManualRepoUrl('');
+    };
+
+    const primaryRepo = selectedRepos[0] || '';
 
     useEffect(() => {
         if (!isTechnical) return;
         const timeout = setTimeout(async () => {
-            if (formData.repo_url && formData.repo_url.includes('github.com')) {
-                try { setPreview(await getRepoPreview(formData.repo_url)); }
+            if (primaryRepo && primaryRepo.includes('github.com')) {
+                try { setPreview(await getRepoPreview(primaryRepo)); }
                 catch { setPreview(null); }
             } else { setPreview(null); }
             if (formData.leetcode_username && formData.leetcode_username.length > 2) {
@@ -89,11 +126,23 @@ export default function CandidateApply() {
             }
         }, 1000);
         return () => clearTimeout(timeout);
-    }, [formData.repo_url, formData.leetcode_username, isTechnical]);
+    }, [primaryRepo, formData.leetcode_username, isTechnical]);
 
     const handleSubmit = async (e) => {
-        e.preventDefault(); setSubmitting(true);
-        try { await submitInvite(token, formData); setSubmitted(true); }
+        e.preventDefault();
+        if (isTechnical && selectedRepos.length === 0) {
+            alert('Please add at least one GitHub repository that shows your relevant work.');
+            return;
+        }
+        setSubmitting(true);
+        try {
+            await submitInvite(token, {
+                ...formData,
+                repo_url: primaryRepo,
+                repo_urls: selectedRepos,
+            });
+            setSubmitted(true);
+        }
         catch (err) {
             if (err.message === 'EXPIRED') setError('expired');
             else if (err.message === 'ALREADY_USED') setError('closed');
@@ -112,25 +161,31 @@ export default function CandidateApply() {
     });
     const topRepos = filteredRepos.slice(0, 5);
     const otherRepos = filteredRepos.slice(5);
-    const renderRepoItem = (repo) => (
-        <li key={repo.url} onClick={() => selectRepo(repo)} className="p-3 hover:bg-[#e6f6f5] cursor-pointer transition-colors">
-            <div className="flex justify-between items-start gap-3">
-                <div className="font-medium text-[#0f172a] flex items-center gap-2 min-w-0">
-                    <span className="truncate">{repo.repo}</span>
-                    <span className="text-xs font-normal text-[#475569] px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: 'rgba(11,95,102,0.08)' }}>
-                        Score: {(repo.score * 10).toFixed(1)}
-                    </span>
+    const renderRepoItem = (repo) => {
+        const selected = isRepoSelected(repo);
+        const atLimit = !selected && selectedRepos.length >= MAX_REPOS;
+        return (
+            <li key={repo.url} onClick={() => !atLimit && toggleRepo(repo)}
+                className={`p-3 transition-colors ${atLimit ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-[#e6f6f5]'} ${selected ? 'bg-[#e6f6f5]' : ''}`}>
+                <div className="flex justify-between items-start gap-3">
+                    <div className="font-medium text-[#0f172a] flex items-center gap-2 min-w-0">
+                        {selected && <CheckCircle className="w-4 h-4 text-[#0b5f66] flex-shrink-0" />}
+                        <span className="truncate">{repo.repo}</span>
+                        <span className="text-xs font-normal text-[#475569] px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: 'rgba(11,95,102,0.08)' }}>
+                            Score: {(repo.score * 10).toFixed(1)}
+                        </span>
+                    </div>
+                    {repo.language && <span className="text-xs px-2 py-0.5 rounded-full bg-[#e6f6f5] text-[#0b5f66] flex-shrink-0">{repo.language}</span>}
                 </div>
-                {repo.language && <span className="text-xs px-2 py-0.5 rounded-full bg-[#e6f6f5] text-[#0b5f66] flex-shrink-0">{repo.language}</span>}
-            </div>
-            <div className="flex gap-4 mt-1 text-xs text-[#94a3b8]">
-                <span className="flex items-center gap-1"><Star className="w-3 h-3" /> Match</span>
-                {repo.last_commit_date && (
-                    <span className="flex items-center gap-1"><GitBranch className="w-3 h-3" /> {new Date(repo.last_commit_date).toLocaleDateString()}</span>
-                )}
-            </div>
-        </li>
-    );
+                <div className="flex gap-4 mt-1 text-xs text-[#94a3b8]">
+                    <span className="flex items-center gap-1"><Star className="w-3 h-3" /> Match</span>
+                    {repo.last_commit_date && (
+                        <span className="flex items-center gap-1"><GitBranch className="w-3 h-3" /> {new Date(repo.last_commit_date).toLocaleDateString()}</span>
+                    )}
+                </div>
+            </li>
+        );
+    };
 
     // ─── Loading ────────────────────────────────────────
     if (loading) return (
@@ -293,18 +348,58 @@ export default function CandidateApply() {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-semibold text-[#475569] mb-1.5">
-                                        Repository URL {isTechnical && <span className="text-red-500">*</span>}
+                                        Add Repository URL {isTechnical && <span className="text-red-500">*</span>}
                                     </label>
-                                    <div className="relative">
-                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <Github className="h-4 w-4 text-[#94a3b8]" />
+                                    <div className="flex gap-2">
+                                        <div className="relative flex-1">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                <Github className="h-4 w-4 text-[#94a3b8]" />
+                                            </div>
+                                            <input type="url" placeholder="https://github.com/username/project"
+                                                value={manualRepoUrl}
+                                                onChange={(e) => setManualRepoUrl(e.target.value)}
+                                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddManualRepo(); } }}
+                                                className={`pl-10 ${inputClass}`} />
                                         </div>
-                                        <input type="url" required={isTechnical} placeholder="https://github.com/username/project"
-                                            value={formData.repo_url}
-                                            onChange={(e) => setFormData({ ...formData, repo_url: e.target.value })}
-                                            className={`pl-10 ${inputClass}`} />
+                                        <button type="button" onClick={handleAddManualRepo}
+                                            disabled={!manualRepoUrl.trim() || selectedRepos.length >= MAX_REPOS}
+                                            className="px-4 py-2.5 rounded-xl border-[1.5px] border-[#0b5f66] text-sm font-semibold text-[#0b5f66] hover:bg-[#e6f6f5] disabled:opacity-40 transition-colors">
+                                            Add
+                                        </button>
                                     </div>
                                 </div>
+                            </div>
+
+                            {/* Selected repositories (up to 3) */}
+                            <div className="mt-3">
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <span className="text-xs font-semibold text-[#475569] uppercase tracking-wider">
+                                        Selected Projects ({selectedRepos.length}/{MAX_REPOS})
+                                    </span>
+                                    {selectedRepos.length > 1 && (
+                                        <span className="text-[11px] text-[#94a3b8]">Each skill is evaluated against your most relevant project</span>
+                                    )}
+                                </div>
+                                {selectedRepos.length === 0 ? (
+                                    <p className="text-xs text-[#94a3b8]">
+                                        Add up to {MAX_REPOS} repositories that best show your work for this role — e.g. one AI project, one API project.
+                                    </p>
+                                ) : (
+                                    <div className="flex flex-wrap gap-2">
+                                        {selectedRepos.map((url, index) => (
+                                            <span key={url}
+                                                className="inline-flex items-center gap-1.5 max-w-full rounded-full border border-[rgba(11,95,102,0.25)] pl-3 pr-1.5 py-1 text-xs font-medium text-[#0b5f66]"
+                                                style={{ background: 'rgba(11,95,102,0.07)' }}>
+                                                <Github className="w-3 h-3 flex-shrink-0" />
+                                                <span className="truncate" title={url}>{url.replace('https://github.com/', '')}</span>
+                                                {index === 0 && <span className="text-[10px] font-bold uppercase text-[#c9a227]">primary</span>}
+                                                <button type="button" onClick={() => removeRepo(url)}
+                                                    className="ml-0.5 rounded-full w-4 h-4 flex items-center justify-center hover:bg-[#0b5f66] hover:text-white transition-colors"
+                                                    title="Remove">×</button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
 
                             {/* Repo picker */}
@@ -312,8 +407,8 @@ export default function CandidateApply() {
                                 <div className="mt-3 rounded-xl border border-[#e6e1d7] overflow-hidden" style={{ background: 'rgba(255,253,248,0.95)', boxShadow: '0 10px 30px rgba(15,23,42,0.08)' }}>
                                     <div className="p-2 border-b border-[#e6e1d7] sticky top-0 z-10 space-y-2" style={{ background: 'rgba(247,245,240,0.95)' }}>
                                         <div className="flex justify-between items-center">
-                                            <span className="text-xs font-bold text-[#475569] uppercase">Select a Repository</span>
-                                            <button type="button" onClick={() => setShowRepoList(false)} className="text-xs text-[#0b5f66] hover:underline">Close</button>
+                                            <span className="text-xs font-bold text-[#475569] uppercase">Select Repositories ({selectedRepos.length}/{MAX_REPOS})</span>
+                                            <button type="button" onClick={() => setShowRepoList(false)} className="text-xs text-[#0b5f66] hover:underline">Done</button>
                                         </div>
                                         <div className="relative">
                                             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#94a3b8]" />
@@ -332,28 +427,8 @@ export default function CandidateApply() {
                                         <div className="p-4 text-center text-sm text-[#94a3b8]">No repositories match.</div>
                                     ) : (
                                         <div className="max-h-72 overflow-y-auto">
-                                            <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-[#0b5f66] bg-[#e6f6f5]">Top Matches</div>
-                                            <ul className="divide-y divide-[#e6e1d7]">
-                                            {topRepos.map((repo) => (
-                                                <li key={repo.url} onClick={() => selectRepo(repo)} className="p-3 hover:bg-[#e6f6f5] cursor-pointer transition-colors">
-                                                    <div className="flex justify-between items-start">
-                                                        <div className="font-medium text-[#0f172a] flex items-center gap-2">
-                                                            {repo.repo}
-                                                            <span className="text-xs font-normal text-[#475569] px-1.5 py-0.5 rounded" style={{ background: 'rgba(11,95,102,0.08)' }}>
-                                                                Score: {(repo.score * 10).toFixed(1)}
-                                                            </span>
-                                                        </div>
-                                                        {repo.language && <span className="text-xs px-2 py-0.5 rounded-full bg-[#e6f6f5] text-[#0b5f66]">{repo.language}</span>}
-                                                    </div>
-                                                    <div className="flex gap-4 mt-1 text-xs text-[#94a3b8]">
-                                                        <span className="flex items-center gap-1"><Star className="w-3 h-3" /> Match</span>
-                                                        {repo.last_commit_date && (
-                                                            <span className="flex items-center gap-1"><GitBranch className="w-3 h-3" /> {new Date(repo.last_commit_date).toLocaleDateString()}</span>
-                                                        )}
-                                                    </div>
-                                                </li>
-                                            ))}
-                                            </ul>
+                                            <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-[#0b5f66] bg-[#e6f6f5]">Top Matches — select up to {MAX_REPOS}</div>
+                                            <ul className="divide-y divide-[#e6e1d7]">{topRepos.map(renderRepoItem)}</ul>
                                             {otherRepos.length > 0 && (
                                                 <>
                                                     <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-[#475569] bg-[#f7f5f0]">All Repositories</div>
@@ -368,7 +443,7 @@ export default function CandidateApply() {
                             {/* Repo preview */}
                             {preview && (
                                 <div className="mt-3 rounded-xl border border-[#e6e1d7] p-4" style={{ background: 'rgba(247,245,240,0.5)' }}>
-                                    <h4 className="text-xs font-semibold text-[#475569] uppercase tracking-wider mb-3">Live Preview</h4>
+                                    <h4 className="text-xs font-semibold text-[#475569] uppercase tracking-wider mb-3">Live Preview — Primary Repository</h4>
                                     <div className="flex items-center gap-3 mb-3">
                                         <Folder className="h-5 w-5 text-[#0b5f66]" />
                                         <span className="font-medium text-[#0f172a]">{preview.name}</span>

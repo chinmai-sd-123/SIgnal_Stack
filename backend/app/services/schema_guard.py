@@ -33,3 +33,8 @@ def ensure_runtime_schema(engine) -> None:
         outcome_columns = _column_names(engine, "outcomes")
         if outcome_columns and dialect == "postgresql":
             connection.execute(text("ALTER TABLE outcomes ALTER COLUMN job_id DROP NOT NULL"))
+
+        submission_columns = _column_names(engine, "invite_submissions")
+        if submission_columns and "repo_urls" not in submission_columns:
+            column_type = "JSONB" if dialect == "postgresql" else "JSON"
+            connection.execute(text(f"ALTER TABLE invite_submissions ADD COLUMN repo_urls {column_type}"))

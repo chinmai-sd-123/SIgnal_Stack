@@ -18,8 +18,10 @@ def get_candidate_id(submission: InviteSubmission) -> str:
 
 def proof_payload_for_submission(submission: InviteSubmission):
     """Build evaluator payload for an invite submission."""
+    repo_urls = submission.repo_urls or ([submission.repo_url] if submission.repo_url else [])
     return {
         "repo_url": submission.repo_url or "",
+        "repo_urls": repo_urls,
         "github_username": submission.github_username or "",
         "leetcode_username": submission.leetcode_username or "",
         "artifact_link": "" if submission.repo_url else (submission.resume_url or ""),

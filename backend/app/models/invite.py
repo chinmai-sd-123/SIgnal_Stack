@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer
+from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer, JSON
 from sqlalchemy.orm import relationship
 from app.config.database import Base
 from app.utils.time_utils import utc_now
@@ -44,6 +44,9 @@ class InviteSubmission(Base):
     candidate_email = Column(String, nullable=False)
     github_username = Column(String, nullable=True)
     repo_url = Column(String, nullable=True)
+    # Up to 3 repositories relevant to the JD. repo_url stays as the primary
+    # (first) repo for backward compatibility with older submissions.
+    repo_urls = Column(JSON, nullable=True)
     linkedin_url = Column(String, nullable=True)
     resume_url = Column(String, nullable=True)
     leetcode_username = Column(String, nullable=True)

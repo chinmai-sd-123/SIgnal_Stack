@@ -21,6 +21,39 @@ from app.utils.time_utils import utc_now
 router = APIRouter(tags=["Invites"])
 
 INVITE_EXPIRY_DAYS = 7
+MAX_SUBMISSION_REPOS = 3
+
+
+def _normalize_repo_urls(data: dict) -> list:
+    """
+    Normalize submitted repositories to a deduped list of up to 3 GitHub URLs.
+
+    Accepts both the newer repo_urls list and the legacy single repo_url field
+    so older clients keep working.
+    """
+    raw = data.get("repo_urls") or []
+    if not isinstance(raw, list):
+        raw = [raw]
+    single = data.get("repo_url", "")
+    if single:
+        raw = [single] + [item for item in raw if item != single]
+
+    seen = set()
+    normalized = []
+    for item in raw:
+        url = str(item or "").strip().rstrip("/")
+        if not url or "github.com" not in url:
+            continue
+        if url.endswith(".git"):
+            url = url[:-4]
+        key = url.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(url)
+        if len(normalized) >= MAX_SUBMISSION_REPOS:
+            break
+    return normalized
 
 
 # ─── Helper: manage proof lifecycle ─────────────────────────────────────────
@@ -143,6 +176,7 @@ def list_invites(
                     "candidate_email": sub.candidate_email,
                     "github_username": sub.github_username,
                     "repo_url": sub.repo_url,
+                    "repo_urls": sub.repo_urls or ([sub.repo_url] if sub.repo_url else []),
                     "linkedin_url": sub.linkedin_url,
                     "resume_url": sub.resume_url,
                     "leetcode_username": sub.leetcode_username,
@@ -243,8 +277,10 @@ def update_submission(
         submission.candidate_email = data["candidate_email"]
     if "github_username" in data:
         submission.github_username = data["github_username"]
-    if "repo_url" in data:
-        submission.repo_url = data["repo_url"]
+    if "repo_url" in data or "repo_urls" in data:
+        repo_urls = _normalize_repo_urls({**{"repo_url": submission.repo_url}, **data})
+        submission.repo_url = repo_urls[0] if repo_urls else data.get("repo_url", "")
+        submission.repo_urls = repo_urls or None
     if "linkedin_url" in data:
         submission.linkedin_url = data["linkedin_url"]
     if "resume_url" in data:
@@ -267,6 +303,7 @@ def update_submission(
         "candidate_email": submission.candidate_email,
         "github_username": submission.github_username,
         "repo_url": submission.repo_url,
+        "repo_urls": submission.repo_urls or ([submission.repo_url] if submission.repo_url else []),
         "linkedin_url": submission.linkedin_url,
         "resume_url": submission.resume_url,
         "leetcode_username": submission.leetcode_username,
@@ -343,7 +380,9 @@ def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
         if existing:
             raise HTTPException(status_code=409, detail="You have already submitted an application with this email")
 
-    # Create submission record
+    # Create submission record (repo_urls supports up to 3 relevant projects;
+    # repo_url stays as the primary repo for backward compatibility)
+    repo_urls = _normalize_repo_urls(data)
     submission = InviteSubmission(
         id=str(uuid.uuid4()),
         invite_id=invite.id,
@@ -351,7 +390,8 @@ def submit_invite(token: str, data: dict, db: Session = Depends(get_db)):
         candidate_name=data.get("candidate_name", ""),
         candidate_email=candidate_email,
         github_username=data.get("github_username", ""),
-        repo_url=data.get("repo_url", ""),
+        repo_url=repo_urls[0] if repo_urls else data.get("repo_url", ""),
+        repo_urls=repo_urls or None,
         linkedin_url=data.get("linkedin_url", ""),
         resume_url=data.get("resume_url", ""),
         leetcode_username=data.get("leetcode_username", ""),
