@@ -294,9 +294,19 @@ export default function ReviewerQueue() {
             </div>
 
             {loading ? (
-                <div className="card p-12 text-center text-gray-500">Loading queue...</div>
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-5" aria-busy="true" aria-label="Loading review queue">
+                    {[0, 1, 2, 3].map((i) => (
+                        <div key={i} className="skeleton-card animate-in" style={{ height: '180px', animationDelay: `${i * 70}ms` }} />
+                    ))}
+                </div>
             ) : sortedJobs.length === 0 ? (
-                <div className="card p-12 text-center text-gray-500">No jobs match this view.</div>
+                <div className="empty-state">
+                    <div className="empty-state-icon">
+                        <Search className="w-6 h-6" />
+                    </div>
+                    <p className="empty-state-title">No jobs match this view</p>
+                    <p className="empty-state-text">Adjust the filters or search to find the job you are looking for.</p>
+                </div>
             ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
                     {sortedJobs.map(({ job, progress, progressError }) => {

@@ -58,14 +58,15 @@ export default function HiringDecisions() {
     };
 
     if (loading) return (
-        <div className="min-h-screen flex items-center justify-center">
-            <div className="text-center">
-                <div className="relative w-16 h-16 mx-auto mb-4">
-                    <div className="absolute inset-0 rounded-full border-4 border-primary/20"></div>
-                    <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin"></div>
-                </div>
-                <p className="text-gray-500 font-medium">Loading analytics...</p>
+        <div className="max-w-7xl mx-auto space-y-6 pb-12" aria-busy="true" aria-label="Loading hiring decisions">
+            <div className="skeleton-card" style={{ height: '160px', borderRadius: '24px' }} />
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="skeleton-card" style={{ height: '110px' }} />
+                <div className="skeleton-card" style={{ height: '110px' }} />
+                <div className="skeleton-card" style={{ height: '110px' }} />
+                <div className="skeleton-card" style={{ height: '110px' }} />
             </div>
+            <div className="skeleton-card" style={{ height: '280px' }} />
         </div>
     );
 
@@ -187,12 +188,12 @@ export default function HiringDecisions() {
                 </div>
 
                 {history.length === 0 ? (
-                    <div className="p-12 text-center">
-                        <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                            <Users className="w-8 h-8 text-gray-400" />
+                    <div className="empty-state m-6">
+                        <div className="empty-state-icon">
+                            <Users className="w-6 h-6" />
                         </div>
-                        <h4 className="text-lg font-semibold text-gray-900 mb-1">No decisions yet</h4>
-                        <p className="text-gray-500">Hiring decisions will appear here once candidates are processed.</p>
+                        <h4 className="empty-state-title">No decisions yet</h4>
+                        <p className="empty-state-text">Hiring decisions will appear here once candidates are processed.</p>
                     </div>
                 ) : (
                     <div className="overflow-x-auto">

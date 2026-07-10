@@ -123,7 +123,13 @@ export default function OutcomeEdit() {
     };
 
     if (loading) {
-        return <div className="p-12 text-center text-gray-500">Loading outcome...</div>;
+        return (
+            <div className="max-w-4xl mx-auto space-y-4 pb-12" aria-busy="true" aria-label="Loading outcome">
+                <div className="skeleton-title" style={{ width: '30%' }} />
+                <div className="skeleton-card" style={{ height: '180px' }} />
+                <div className="skeleton-card" style={{ height: '240px' }} />
+            </div>
+        );
     }
 
     if (!outcome) {

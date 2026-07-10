@@ -38,15 +38,26 @@ export default function Dashboard() {
             </div>
 
             {loading ? (
-                <div className="text-center py-12">
-                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent"></div>
-                    <p className="mt-2 text-gray-500">Loading outcomes...</p>
+                <div className="space-y-3" aria-busy="true" aria-label="Loading outcomes">
+                    {[0, 1, 2].map((i) => (
+                        <div key={i} className="bg-white rounded-lg border border-gray-200 px-4 py-4 sm:px-6 animate-in" style={{ animationDelay: `${i * 80}ms` }}>
+                            <div className="flex items-center gap-4">
+                                <div className="skeleton-avatar" />
+                                <div className="flex-1 space-y-2">
+                                    <div className="skeleton-title" style={{ width: '35%' }} />
+                                    <div className="skeleton-text" style={{ width: '55%' }} />
+                                </div>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             ) : outcomes.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-lg border-2 border-dashed border-gray-300">
-                    <Activity className="mx-auto h-12 w-12 text-gray-400" />
-                    <h3 className="mt-2 text-sm font-medium text-gray-900">No outcomes defined</h3>
-                    <p className="mt-1 text-sm text-gray-500">Get started by creating a new outcome definition.</p>
+                <div className="empty-state">
+                    <div className="empty-state-icon">
+                        <Activity className="h-6 w-6" />
+                    </div>
+                    <h3 className="empty-state-title">No outcomes defined</h3>
+                    <p className="empty-state-text">Get started by creating a new outcome definition.</p>
                     <div className="mt-6">
                         <Link
                             to="/create-outcome"

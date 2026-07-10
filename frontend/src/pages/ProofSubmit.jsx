@@ -190,7 +190,12 @@ export default function ProofSubmit() {
         }
     };
 
-    if (loading) return <div className="p-8 text-center">Loading...</div>;
+    if (loading) return (
+        <div className="max-w-3xl mx-auto space-y-4 p-8" aria-busy="true" aria-label="Loading">
+            <div className="skeleton-title" style={{ width: '40%' }} />
+            <div className="skeleton-card" style={{ height: '260px' }} />
+        </div>
+    );
     if (!outcome) return <div className="p-8 text-center">Outcome not found.</div>;
 
     if (submitted) {

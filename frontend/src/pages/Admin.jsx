@@ -158,8 +158,13 @@ export default function Admin() {
                     </div>
                 )}
                 {loading ? (
-                    <div className="flex items-center justify-center py-12">
-                        <RefreshCw className="w-8 h-8 animate-spin text-primary" />
+                    <div className="space-y-4" aria-busy="true" aria-label="Loading admin data">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="skeleton-card" style={{ height: '90px' }} />
+                            <div className="skeleton-card" style={{ height: '90px' }} />
+                            <div className="skeleton-card" style={{ height: '90px' }} />
+                        </div>
+                        <div className="skeleton-card" style={{ height: '200px' }} />
                     </div>
                 ) : (
                     <>
@@ -219,7 +224,10 @@ export default function Admin() {
                                 <h2 className="heading-2 mb-4">Task Weight History</h2>
                                 <div className="space-y-2 max-h-[600px] overflow-y-auto">
                                     {taskWeightHistory.length === 0 ? (
-                                        <p className="text-gray-400 text-center py-8">No task learning recorded yet</p>
+                                        <div className="empty-state">
+                                            <p className="empty-state-title">No task learning yet</p>
+                                            <p className="empty-state-text">Task weight adjustments from recruiter feedback will appear here.</p>
+                                        </div>
                                     ) : (
                                         taskWeightHistory.map((item) => (
                                             <div key={item.id} className="bg-gray-50 rounded-lg p-4 border border-gray-100">
@@ -249,7 +257,10 @@ export default function Admin() {
                                 <h2 className="heading-2 mb-4">Audit Logs</h2>
                                 <div className="space-y-2 max-h-[600px] overflow-y-auto">
                                     {auditLogs.length === 0 ? (
-                                        <p className="text-gray-400 text-center py-8">No audit logs recorded yet</p>
+                                        <div className="empty-state">
+                                            <p className="empty-state-title">No audit logs yet</p>
+                                            <p className="empty-state-text">Important actions like job creation, decisions, and weight updates are recorded here.</p>
+                                        </div>
                                     ) : (
                                         auditLogs.map((log, i) => (
                                             <div key={i} className="bg-gray-50 rounded-lg p-4 border border-gray-100">
@@ -358,7 +369,7 @@ export default function Admin() {
                                     {llmLogs.length === 0 ? (
                                         <div className="text-center py-8 border border-dashed border-gray-200 rounded-lg bg-gray-50">
                                             <AlertTriangle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                                            <p className="text-gray-500">No persisted prompt logs recorded yet</p>
+                                            <p className="empty-state-text">No persisted prompt logs recorded yet</p>
                                             <p className="text-xs text-gray-400 mt-1">Usage, token, latency, cache, and cost metrics are still shown above.</p>
                                         </div>
                                     ) : (
@@ -440,7 +451,10 @@ export default function Admin() {
 
                                 <div className="space-y-3 max-h-[600px] overflow-y-auto">
                                     {recruiterInvites.length === 0 ? (
-                                        <p className="text-gray-400 text-center py-8">No recruiter invites yet</p>
+                                        <div className="empty-state">
+                                            <p className="empty-state-title">No recruiter invites yet</p>
+                                            <p className="empty-state-text">Create an invite to onboard a new recruiter to the workspace.</p>
+                                        </div>
                                     ) : (
                                         recruiterInvites.map((invite) => (
                                             <div key={invite.id} className="rounded-lg border border-gray-200 bg-white p-4">

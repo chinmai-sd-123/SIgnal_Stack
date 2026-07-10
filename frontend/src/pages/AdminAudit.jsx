@@ -47,8 +47,11 @@ export default function AdminAudit() {
                             <tbody className="bg-white divide-y divide-gray-100">
                                 {logs.length === 0 ? (
                                     <tr>
-                                        <td colSpan="3" className="px-6 py-12 text-center text-gray-500">
-                                            No audit logs found.
+                                        <td colSpan="3" className="px-6 py-8">
+                                            <div className="empty-state" style={{ border: 'none', background: 'transparent' }}>
+                                                <p className="empty-state-title">No audit logs found</p>
+                                                <p className="empty-state-text">System actions will appear here as they happen.</p>
+                                            </div>
                                         </td>
                                     </tr>
                                 ) : (

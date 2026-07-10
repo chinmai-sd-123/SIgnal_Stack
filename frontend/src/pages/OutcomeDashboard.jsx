@@ -58,8 +58,12 @@ export default function OutcomeDashboard() {
     };
 
     if (loading) return (
-        <div className="flex justify-center items-center py-20">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <div className="space-y-6" aria-busy="true" aria-label="Loading outcome">
+            <div className="skeleton-card" style={{ height: '140px' }} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="skeleton-card" style={{ height: '200px' }} />
+                <div className="skeleton-card" style={{ height: '200px' }} />
+            </div>
         </div>
     );
 
@@ -126,10 +130,12 @@ export default function OutcomeDashboard() {
                         </div>
 
                         {proofs.length === 0 ? (
-                            <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
-                                <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                                <p className="text-gray-500 font-medium">No candidates yet</p>
-                                <p className="text-sm text-gray-400 mt-1">Share the invite link to start receiving submissions.</p>
+                            <div className="empty-state">
+                                <div className="empty-state-icon">
+                                    <Users className="w-6 h-6" />
+                                </div>
+                                <p className="empty-state-title">No candidates yet</p>
+                                <p className="empty-state-text">Share the invite link to start receiving submissions.</p>
                             </div>
                         ) : (
                             <ul className="divide-y divide-gray-100">

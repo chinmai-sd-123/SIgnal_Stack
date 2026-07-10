@@ -73,7 +73,11 @@ export default function FeedbackView() {
                 </div>
 
                 {loading ? (
-                    <div className="p-12 text-center text-gray-500">Loading learning data...</div>
+                    <div className="p-6 space-y-3" aria-busy="true" aria-label="Loading learning data">
+                        <div className="skeleton-text" style={{ width: '70%' }} />
+                        <div className="skeleton-text" style={{ width: '85%' }} />
+                        <div className="skeleton-text" style={{ width: '60%' }} />
+                    </div>
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-gray-100">
@@ -138,9 +142,15 @@ export default function FeedbackView() {
                 </div>
 
                 {loading ? (
-                    <div className="p-12 text-center text-gray-500">Loading task learning data...</div>
+                    <div className="p-6 space-y-3" aria-busy="true" aria-label="Loading task learning data">
+                        <div className="skeleton-text" style={{ width: '75%' }} />
+                        <div className="skeleton-text" style={{ width: '60%' }} />
+                    </div>
                 ) : taskHistory.length === 0 ? (
-                    <div className="p-12 text-center text-gray-500">No task-level feedback recorded yet.</div>
+                    <div className="empty-state m-6">
+                        <p className="empty-state-title">No task-level feedback yet</p>
+                        <p className="empty-state-text">Boost or reduce task weights from an evaluation report and the learning history will appear here.</p>
+                    </div>
                 ) : (
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-gray-100">

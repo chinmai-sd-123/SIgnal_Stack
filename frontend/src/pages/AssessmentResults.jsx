@@ -32,7 +32,10 @@ export default function AssessmentResults() {
             <h1 className="heading-1 mb-8">Hiring Decisions</h1>
 
             {loading ? (
-                <div className="text-center py-12">Loading results...</div>
+                <div className="space-y-4" aria-busy="true" aria-label="Loading results">
+                    <div className="skeleton-card" style={{ height: '120px' }} />
+                    <div className="skeleton-card" style={{ height: '120px' }} />
+                </div>
             ) : hires.length === 0 ? (
                 <div className="card p-12 text-center">
                     <p className="text-gray-500">No hiring decisions made yet.</p>
